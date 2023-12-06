@@ -20,7 +20,13 @@
 #'
 #'@param w numeric matrix of dim \code{G x n} containing the weights for G genes from the \code{n}
 #'samples, corresponding to the inverse of the diagonal of the estimated
-#'covariance matrix of y.
+#'covariance matrix of y. Default is \code{NULL}, in which case heteroskedasticity is not 
+#'taken into account. 
+#'
+#'@param cor_structure a logical flag indicating whether gene-set level correlation
+#'structures are to be estimated as well as the heteroskedasticity weights. In this case, 
+#'generalised least squares is performed instead of weighted least squares to estimate 
+#'the centralised gene expression. Default is \code{TRUE}.
 #'
 #'@param Sigma_xi a matrix of size \code{K x K} containing the covariance matrix
 #'of the \code{K} random effects corresponding to \code{phi}.
@@ -61,20 +67,20 @@
 #'
 #'##generate some fake data
 #'########################
-#'n <- 100
-#'r <- 12
-#'t <- matrix(rep(1:(r/4)), 4, ncol=1, nrow=r)
-#'sigma <- 0.4
-#'b0 <- 1
-#'
-#'#under the null:
-#'b1 <- 0
-#'#under the alternative:
-#'#b1 <- 0.5
-#'y.tilde <- b0 + b1*t + rnorm(r, sd = sigma)
-#'y <- t(matrix(rnorm(n*r, sd = sqrt(sigma*abs(y.tilde))), ncol=n, nrow=r) +
-#'       matrix(rep(y.tilde, n), ncol=n, nrow=r))
-#'x <- matrix(1, ncol=1, nrow=r)
+# n <- 100
+# r <- 12
+# t <- matrix(rep(1:(r/4)), 4, ncol=1, nrow=r)
+# sigma <- 0.4
+# b0 <- 1
+# 
+# #under the null:
+# b1 <- 0
+# #under the alternative:
+# #b1 <- 0.5
+# y.tilde <- b0 + b1*t + rnorm(r, sd = sigma)
+# y <- t(matrix(rnorm(n*r, sd = sqrt(sigma*abs(y.tilde))), ncol=n, nrow=r) +
+#       matrix(rep(y.tilde, n), ncol=n, nrow=r))
+# x <- matrix(1, ncol=1, nrow=r)
 #'
 #'#run test
 #'asymTestRes <- vc_test_asym(y, x, phi=cbind(t, t^2),
@@ -103,10 +109,15 @@ vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w,
     }
 
     nindiv <- nrow(score_list$q_ext)
-    ng <- nrow(y)
+    g <- nrow(y)
+    n <- ncol(y)
     nphi <- ncol(phi)
+    
+    if (w = NULL){
+      w <- matrix(1, nrow = g, ncol = n) # if no weights specified, heteroskedasticity not accounted for
+    }
 
-    if (ng * nindiv < 1) {
+    if (g * nindiv < 1) {
         stop("no gene measured/no sample included ...")
     }
 
@@ -119,8 +130,8 @@ vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w,
           pv <- stats::pchisq(gene_scores_obs/gene_lambda, df = 1,
                               lower.tail = FALSE)
         } else {
-            gene_inds <- lapply(seq_len(ng), function(x) {
-                x + (ng) * (seq_len(nphi) - 1)
+            gene_inds <- lapply(seq_len(g), function(x) {
+                x + (g) * (seq_len(nphi) - 1)
             })
 
             gene_lambda <- lapply(gene_inds, function(x) {
@@ -167,7 +178,7 @@ vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w,
     } else {
 
         if (nindiv == 1) {
-            Sig_q <- matrix(1, ng, ng)
+            Sig_q <- matrix(1, g, g)
         } else {
             Sig_q <- cov(score_list$q_ext)
         }

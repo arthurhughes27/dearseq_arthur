@@ -186,7 +186,7 @@ vc_score_h_perm <- function(y, x, indiv, phi, w,
 
     alpha <- solve(crossprod(x)) %*% t(x) %*% rowMeans(y_T, na.rm = na_rm)
     yt_mu <- y_T - do.call(cbind, replicate(g, x %*% alpha, simplify = FALSE))
-
+    
 
     ## test statistic computation ------
     sig_xi_sqrt <- (Sigma_xi * diag(K)) %^% (-0.5)

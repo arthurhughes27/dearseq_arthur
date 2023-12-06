@@ -194,23 +194,23 @@
 #'
 #'@examples
 #'
-#'nsims <- 2 #100
-#'res_quant <- list()
-#'for(i in 1:2){
-#'  n <- 2000#0
-#'  nr <- 3
-#'  r <- nr*20 #4*nr#100*nr
-#'  t <- matrix(rep(1:nr), r/nr, ncol=1, nrow=r)
-#'  sigma <- 0.4
-#'  b0 <- 1
-#'
-#'  #under the null:
-#'  b1 <- 0
-#'
-#'  y.tilde <- b0 + b1*t + rnorm(r, sd = sigma)
-#'  y <- t(matrix(rnorm(n*r, sd = sqrt(sigma*abs(y.tilde))), ncol=n, nrow=r) +
-#'         matrix(rep(y.tilde, n), ncol=n, nrow=r))
-#'  x <- matrix(1, ncol=1, nrow=r)
+# nsims <- 2 #100
+# res_quant <- list()
+# for(i in 1:2){
+#  n <- 2000#0
+#  nr <- 3
+#  r <- nr*20 #4*nr#100*nr
+#  t <- matrix(rep(1:nr), r/nr, ncol=1, nrow=r)
+#  sigma <- 0.4
+#  b0 <- 1
+# 
+#  #under the null:
+#  b1 <- 0
+# 
+#  y.tilde <- b0 + b1*t + rnorm(r, sd = sigma)
+#  y <- t(matrix(rnorm(n*r, sd = sqrt(sigma*abs(y.tilde))), ncol=n, nrow=r) +
+#         matrix(rep(y.tilde, n), ncol=n, nrow=r))
+#  x <- matrix(1, ncol=1, nrow=r)
 #'
 #'  #run test
 #'  res <- dgsa_seq(exprmat = y, covariates = x, variables2test = t,

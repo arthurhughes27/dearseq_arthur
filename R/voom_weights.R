@@ -3,8 +3,8 @@
 #'Implementation of the procedure described in Law \emph{et al.} for estimating
 #'precision weights from RNA-seq data.
 #'
-#'@param y a matrix of size \code{G x n} containing the raw RNA-seq counts or
-#'preprocessed expressions from \code{n} samples for \code{G} genes.
+#'@param y a matrix of size \code{g x n} containing the raw RNA-seq counts or
+#'preprocessed expressions from \code{n} samples for \code{g} genes.
 #'
 #'@param x a matrix of size \code{n x p} containing the model covariates from
 #'\code{n} samples (design matrix).
@@ -33,11 +33,11 @@
 #'@examples
 #'set.seed(123)
 #'
-#'G <- 10000
+#'g <- 10000
 #'n <- 12
 #'p <- 2
 #'
-#'y <- sapply(1:n, FUN=function(x){rnbinom(n=G, size=0.07, mu=200)})
+#'y <- sapply(1:n, FUN=function(x){rnbinom(n=g, size=0.07, mu=200)})
 #'x <- sapply(1:p, FUN=function(x){rnorm(n=n, mean=n, sd=1)})
 #'
 #'my_w <-  voom_weights(y, x)

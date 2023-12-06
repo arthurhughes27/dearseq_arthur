@@ -3,8 +3,8 @@
 #'Computes precision weights that account for heteroscedasticity in RNA-seq
 #'count data based on non-parametric local linear regression estimates.
 #'
-#'@param y a numeric matrix of size \code{G x n} containing the raw RNA-seq
-#'counts or preprocessed expression from \code{n} samples for \code{G} genes.
+#'@param y a numeric matrix of size \code{g x n} containing the raw RNA-seq
+#'counts or preprocessed expression from \code{n} samples for \code{g} genes.
 #'
 #'@param x a numeric matrix of size \code{n x p} containing the model
 #'covariate(s) from \code{n} samples (design matrix).
@@ -50,7 +50,7 @@
 #'\code{NaN}) be omitted from the calculations? Default is \code{FALSE}.
 #'
 #'@return a list containing the following components:\itemize{
-#'\item \code{weights}: a matrix \code{n x G} containing the computed precision 
+#'\item \code{weights}: a matrix \code{n x g} containing the computed precision 
 #'weights 
 #'\item \code{plot_utilities}: a list containing the following elements:\itemize{
 #'      \item\code{reverse_trans}: a function encoding the reverse function used 
@@ -72,10 +72,10 @@
 #'@examples
 #'set.seed(123)
 #'
-#'G <- 10000
+#'g <- 10000
 #'n <- 12
 #'p <- 2
-#'y <- sapply(1:n, FUN = function(x){rnbinom(n = G, size = 0.07, mu = 200)})
+#'y <- sapply(1:n, FUN = function(x){rnbinom(n = g, size = 0.07, mu = 200)})
 #'
 #'x <- sapply(1:p, FUN = function(x){rnorm(n = n, mean = n, sd = 1)})
 #'

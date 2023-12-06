@@ -16,12 +16,17 @@
 #'to be a \code{factor}.
 #'
 #'@param phi a numeric design matrix of size \code{n x K} containing the
-#'\code{K} longitudinal variables to be tested (typically a vector of time
+#'\code{K} variables to be tested (typically a vector of time
 #'points or functions of time).
 #'
 #'@param w a vector of length \code{n} containing the weights for the \code{n}
 #'samples, corresponding to the inverse of the diagonal of the estimated
 #'covariance matrix of y.
+#'
+#'@param Sigma a list of \code{n} matrices of size \code{g x g} giving the within-set
+#'gene-gene correlation structure and heteroskedasticity weights (computed by
+#'the function GS_cor()). Default is \code{NULL}, in which case such structures will
+#'not be taken into account. 
 #'
 #'@param Sigma_xi a matrix of size \code{K x K} containing the covariance matrix
 #'of the \code{K} random effects corresponding to \code{phi}.
@@ -95,11 +100,19 @@
 #'
 #'@export
 vc_score_h <- function(y, x, indiv, phi, w, Sigma_xi = diag(ncol(phi)),
-                       na_rm = FALSE) {
+                       Sigma = NULL, na_rm = FALSE) {
 
     ## validity checks
     if (sum(!is.finite(w)) > 0) {
         stop("At least 1 non-finite weight in 'w'")
+    }
+    
+    if (!is.null(Sigma)){
+      cor_structure = TRUE # set argument if Sigma provided
+    }
+  
+    if (cor_structure == TRUE & (sum(!is.finite(unlist(Sigma)))) > 0) {
+      stop("At least 1 non-finite covariance entry in Sigma")
     }
 
     ## dimensions check------
@@ -117,8 +130,11 @@ vc_score_h <- function(y, x, indiv, phi, w, Sigma_xi = diag(ncol(phi)),
     stopifnot(ncol(w) == n)
     stopifnot(nrow(phi) == n)
     stopifnot(length(indiv) == n)
-
-
+    if (cor_structure == TRUE){
+    stopifnot(length(Sigma) == n)
+    stopifnot(all(unlist(lapply(Sigma, dim)) == g)) # all covariance matrices should be gxg
+    }
+  
     # the number of random effects
     if (length(Sigma_xi) == 1) {
         K <- 1
@@ -154,13 +170,18 @@ vc_score_h <- function(y, x, indiv, phi, w, Sigma_xi = diag(ncol(phi)),
     ## mu_new <- x_tilde %*% alpha
     ## y_mu <- y_tilde - mu_new
 
-
+    
+    # Fitting genewise generalised OLS model to estimate gene expression without mean 
+    # effect of covariates. Covariates are assumed to
+    # have homogeneous effects across genes in the set, so a singular alpha is
+    # calculated for each covariate.
+    
     alpha <- solve(crossprod(x)) %*% t(x) %*% rowMeans(y_T, na.rm = na_rm)
     yt_mu <- y_T - do.call(cbind, replicate(g, x %*% alpha, simplify = FALSE))
 
 
     ## test statistic computation ------
-    sig_xi_sqrt <- (Sigma_xi * diag(K)) %^% (-0.5)
+    sig_xi_sqrt <- (Sigma_xi * diag(K))^(-0.5)
     # sig_xi_sqrt <- (Sigma_xi %^% (-0.5))
 
     ## xtx_inv <- solve(t(x_tilde) %*% x_tilde)
@@ -171,7 +192,7 @@ vc_score_h <- function(y, x, indiv, phi, w, Sigma_xi = diag(ncol(phi)),
     ## for (i in 1:nb_indiv){ #for all the genes at once
     ##      select <- indiv==levels(indiv)[i]
     ##      long_select <- long_indiv==levels(indiv)[i]
-    ##      y_mu_i <- as.vector(y_mu[long_select,])
+    ##      y_mu_i <- as.vector(y_mu[long_select,K])
     ##      y_tilde_i <- c(y_ij)
     ##      x_tilde_i <- x_tilde[long_select,]
     ##      sigma_eps_inv_diag <- c(t(w)[select,])
@@ -182,12 +203,25 @@ vc_score_h <- function(y, x, indiv, phi, w, Sigma_xi = diag(ncol(phi)),
     ## }
     ## XT <- colMeans(XT_i)
     ## q_ext <- q - U %*% XT
-
-    sig_eps_inv_T <- t(w)
-    phi_sig_xi_sqrt <- phi %*% sig_xi_sqrt
-    T_fast <- do.call(cbind, replicate(K, sig_eps_inv_T, simplify = FALSE)) *
+    
+    if (cor_structure == FALSE){
+      sig_eps_inv_T <- t(w)
+      phi_sig_xi_sqrt <- phi %*% sig_xi_sqrt
+      T_fast <- do.call(cbind, replicate(K, sig_eps_inv_T, simplify = FALSE)) * # element-wise multiplication
         matrix(apply(phi_sig_xi_sqrt, 2, rep, g), ncol = g * K)
-    q_fast <- do.call(cbind, replicate(K, yt_mu, simplify = FALSE)) * T_fast
+      q_fast <- do.call(cbind, replicate(K, yt_mu, simplify = FALSE)) * T_fast # observation-level contributions
+    } else {
+        T_fast_list = vector("list", n)    
+        q_fast = matrix(ncol = g, nrow = n)
+        for (i in c(1:n)){
+          T_fast_list[[i]] = matrix(ncol = g, nrow = g)
+          sig_eps_inv_T = Sigma[[i]]
+          phi_sig_xi_sqrt <- phi[i] %*% sig_xi_sqrt
+          phi_diag = t(as.matrix(bdiag(rep(list(phi_sig_xi_sqrt), g))))
+          T_fast_list[[i]] <- sig_eps_inv_T %*% phi_diag
+          q_fast[i,] = yt_mu[i,] %*% sig_eps_inv_T %*% phi_diag # observation level contributions  
+      }
+    }
 
     if (length(levels(indiv)) > 1) {
         indiv_mat <- stats::model.matrix(~0 + factor(indiv))
@@ -196,9 +230,11 @@ vc_score_h <- function(y, x, indiv, phi, w, Sigma_xi = diag(ncol(phi)),
     }
 
     if (na_rm & sum(is.na(q_fast)) > 0) {
-        q_fast[is.na(q_fast)] <- 0
+        q_fast[is.na(q_fast)] <- 0 # setting na values to 0 if specfied
     }
-    q <- crossprod(indiv_mat, q_fast)
+    
+    q <- crossprod(indiv_mat, q_fast) # sum of each individual's observation level contributions
+    
     XT_fast <- t(x) %*% T_fast/nb_indiv
     avg_xtx_inv_tx <- nb_indiv * tcrossprod(solve(crossprod(x, x)), x)
     U_XT <- matrix(yt_mu, ncol = g * n_t, nrow = n) *
