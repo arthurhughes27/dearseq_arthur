@@ -98,7 +98,7 @@ vc_score <- function(y, x, indiv = NULL, phi, w = NULL, Sigma_xi = diag(ncol(phi
     q <- ncol(x)  # the number of covariates
     K <- ncol(phi) # the number of test variables
     
-    if (!is.null(indiv)){
+    if (is.null(indiv)){
       indiv = c(1:n) # set argument if Sigma provided
     }
     
@@ -139,8 +139,9 @@ vc_score <- function(y, x, indiv = NULL, phi, w = NULL, Sigma_xi = diag(ncol(phi
       y_0 <- y
       }
     
+    sigma_inv = vector("list", n_indiv)
     y_mu_list = vector("list", n_indiv)
-    for (i in c(1:n_indiv)){   
+    for (i in c(1:n_indiv)){
       if (n_i[i] == 1){
         X_diag = t(as.matrix(bdiag(rep(list(x[indiv == i,]), p))))
       } else {
@@ -153,82 +154,112 @@ vc_score <- function(y, x, indiv = NULL, phi, w = NULL, Sigma_xi = diag(ncol(phi
       }
     
       if (cor_structure == TRUE){
-        sigma_inv = solve(sigma_list[[i]]) # full unstructured covariance matrix
+        sigma_inv[[i]] = solve(sigma_list[[i]]) # full unstructured covariance matrix
       } else {
         wcol = rep(0,n_i[i]*p)
         for (g in c(1:p)){
           wcol[c(((g-1)*n_i[i]+1):(g*n_i[i]))] = w[g,indiv == i]
         }
-        sigma_inv = diag(wcol)
+        sigma_inv[[i]] = diag(wcol)
       }
     
       y_mu_list[[i]] = rep(0, n_i[i]*p)
-      xt_sig_x_inv = Ginv((t(X_diag) %*% sigma_inv %*% X_diag))
-      y_mu_list[[i]] = yi - X_diag %*% xt_sig_x_inv %*% t(X_diag) %*% sigma_inv %*% yi
+      xt_sig_x_inv = Ginv((t(X_diag) %*% sigma_inv[[i]] %*% X_diag))
+      y_mu_list[[i]] = yi - X_diag %*% xt_sig_x_inv %*% t(X_diag) %*% sigma_inv[[i]] %*% yi
       }
-
-    sig_xi_sqrt <- (Sigma_xi * diag(K)) %^% (-0.5)
-    sig_eps_inv_T <- t(w)
-    phi_sig_xi_sqrt <- phi %*% sig_xi_sqrt
-
-    T_fast <- do.call(cbind, replicate(K, sig_eps_inv_T, simplify = FALSE)) *
-        matrix(apply(phi_sig_xi_sqrt, 2, rep, p), ncol = p * K)
-    ##---------------------
-    ## the structure of T_fast is time_basis_1*gene_1, time_basis_1*gene_2, ...,
-    ## time_basis_1*gene_p, ..., time_basis_K*gene_1, ..., time_basis_K*gene_p
-    ##----------------------------
-    q_fast <- matrix(yt_mu, ncol = p * K, nrow = n) * T_fast
-
-    ## dplyr seems to be less efficient here
-    ## q_fast_tb <- tibble::as_tibble(cbind.data.frame(indiv, q_fast))
-    ## q_dp <- q_fast_tb %>% group_by(indiv) %>% summarise_all(sum)
-
-    ## aggregate is much slower also
-    ## qtemp <- aggregate(. ~ indiv, cbind.data.frame(indiv, q_fast), sum)
-    ## qtemp <- aggregate(. ~ indiv, cbind.data.frame(indiv, q_fast), sum)
-
-    ## data.table hard to test, but seems to be at least 10 times slower on big
-    ## datasets (weird)
-    ## m_dt <- data.table('indiv'=factor(rep(c(1:20), each=5)), mbig)
-    ## temp <- m_dt[, lapply(.SD, sum), by=indiv]
-
-
-    # the 2 'by' statements below used to represent the longest AND most memory
-    # intensive part of this for genewise analysis:
-    if (length(levels(indiv)) > 1) {
-        indiv_mat <- stats::model.matrix(~0 + factor(indiv))
+    
+    
+    Q_mat = matrix(0,nrow = p*K, ncol = n_indiv)
+    
+    for (i in c(1:n_indiv)){
+    if (n_i[i] == 1){
+      phi_diag = t(as.matrix(bdiag(rep(list(phi[indiv == i,]), p))))
     } else {
-        indiv_mat <- matrix(as.numeric(indiv), ncol = 1)
+      phi_diag = as.matrix(bdiag(rep(list(phi[indiv == i,]), p)))
     }
-
-    if (na_rm & sum(is.na(q_fast)) > 0) {
-        q_fast[is.na(q_fast)] <- 0
+    
+    Q_mat[,i] = t(y_mu_list[[i]]) %*% sigma_inv[[i]] %*% phi_diag}
+    
+    Q_bar = (1/n_indiv)*rowSums(Q_mat)
+    Q_list = vector("list", n_indiv)
+    for (i in c(1:n_indiv)){
+      Q_list[[i]] = tcrossprod(Q_mat[,i] - Q_bar)
     }
-    q <- crossprod(indiv_mat, q_fast)
-    XT_fast <- crossprod(x, T_fast)/n_indiv
-    avg_xtx_inv_tx <- n_indiv * tcrossprod(solve(crossprod(x, x)), x)
-    U_XT <- matrix(yt_mu, ncol = p * K, nrow = n) *
-        crossprod(avg_xtx_inv_tx, XT_fast)
-    if (na_rm & sum(is.na(U_XT)) > 0) {
-        U_XT[is.na(U_XT)] <- 0
-    }
-    U_XT_indiv <- crossprod(indiv_mat, U_XT)
-    q_ext <- q - U_XT_indiv 
-    # sapply(1:6, function(i){(q_ext[i,] - q_ext_fast_indiv[i,])})
+    Gamma = Reduce('+', Q_list)
+    
+    q_col = n^{-1/2}*rowSums(Q_mat)
+    Q = crossprod(q_col)
+    gene_Q = rowSums(Q_mat) # pay attention to case with >1 testing variable 
+    
+    return(list(score = Q, q = Q_mat, q_ext = Q_mat,
+                gene_scores_unscaled = gene_Q, Gamma = Gamma))
+    
+    # Blocked out by arthur
+    # sig_xi_sqrt <- (Sigma_xi * diag(K)) ^ (-0.5)
+    # sig_eps_inv_T <- t(w)
+    # 
+    # phi_sig_xi_sqrt <- phi %*% sig_xi_sqrt
+    # 
+    # 
+    # 
+    # T_fast <- do.call(cbind, replicate(K, sig_eps_inv_T, simplify = FALSE)) *
+    #     matrix(apply(phi_sig_xi_sqrt, 2, rep, p), ncol = p * K)
+    # ##---------------------
+    # ## the structure of T_fast is time_basis_1*gene_1, time_basis_1*gene_2, ...,
+    # ## time_basis_1*gene_p, ..., time_basis_K*gene_1, ..., time_basis_K*gene_p
+    # ##----------------------------
+    # q_fast <- matrix(yt_mu, ncol = p * K, nrow = n) * T_fast
+    # 
+    # ## dplyr seems to be less efficient here
+    # ## q_fast_tb <- tibble::as_tibble(cbind.data.frame(indiv, q_fast))
+    # ## q_dp <- q_fast_tb %>% group_by(indiv) %>% summarise_all(sum)
+    # 
+    # ## aggregate is much slower also
+    # ## qtemp <- aggregate(. ~ indiv, cbind.data.frame(indiv, q_fast), sum)
+    # ## qtemp <- aggregate(. ~ indiv, cbind.data.frame(indiv, q_fast), sum)
+    # 
+    # ## data.table hard to test, but seems to be at least 10 times slower on big
+    # ## datasets (weird)
+    # ## m_dt <- data.table('indiv'=factor(rep(c(1:20), each=5)), mbig)
+    # ## temp <- m_dt[, lapply(.SD, sum), by=indiv]
+    # 
+    # 
+    # # the 2 'by' statements below used to represent the longest AND most memory
+    # # intensive part of this for genewise analysis:
+    # if (length(levels(indiv)) > 1) {
+    #     indiv_mat <- stats::model.matrix(~0 + factor(indiv))
+    # } else {
+    #     indiv_mat <- matrix(as.numeric(indiv), ncol = 1)
+    # }
+    # 
+    # if (na_rm & sum(is.na(q_fast)) > 0) {
+    #     q_fast[is.na(q_fast)] <- 0
+    # }
+    # q <- crossprod(indiv_mat, q_fast)
+    # XT_fast <- crossprod(x, T_fast)/n_indiv
+    # avg_xtx_inv_tx <- n_indiv * tcrossprod(solve(crossprod(x, x)), x)
+    # U_XT <- matrix(yt_mu, ncol = p * K, nrow = n) *
+    #     crossprod(avg_xtx_inv_tx, XT_fast)
+    # if (na_rm & sum(is.na(U_XT)) > 0) {
+    #     U_XT[is.na(U_XT)] <- 0
+    # }
+    # U_XT_indiv <- crossprod(indiv_mat, U_XT)
+    # q_ext <- q - U_XT_indiv 
+    # # sapply(1:6, function(i){(q_ext[i,] - q_ext_fast_indiv[i,])})
+    # 
+    # 
+    # 
+    # qq <- colSums(q, na.rm = na_rm)^2/n_indiv  # genewise scores
+    # 
+    # ##qq <- unlist(by(data=matrix(qq, ncol=1), INDICES=rep(1:p, K), FUN=sum,
+    # ##                simplify = FALSE)) # veryslow
+    # ## gene_inds <- lapply(1:p, function(x){x + (p)*(0:(K-1))})
+    # ## gene_Q <- sapply(gene_inds, function(x) sum(qq[x])) # old computation
+    # ## gene_Q <- tcrossprod(qq, matrix(diag(p), nrow=p, ncol=p*K))[1, ] # faster
+    # gene_Q <- rowSums(matrix(qq, ncol = K))  # even faster
+    # 
+    # QQ <- sum(qq)  #n_indiv=nrow(q) # set score
 
-
-
-    qq <- colSums(q, na.rm = na_rm)^2/n_indiv  # genewise scores
-
-    ##qq <- unlist(by(data=matrix(qq, ncol=1), INDICES=rep(1:p, K), FUN=sum,
-    ##                simplify = FALSE)) # veryslow
-    ## gene_inds <- lapply(1:p, function(x){x + (p)*(0:(K-1))})
-    ## gene_Q <- sapply(gene_inds, function(x) sum(qq[x])) # old computation
-    ## gene_Q <- tcrossprod(qq, matrix(diag(p), nrow=p, ncol=p*K))[1, ] # faster
-    gene_Q <- rowSums(matrix(qq, ncol = K))  # even faster
-
-    QQ <- sum(qq)  #n_indiv=nrow(q) # set score
-
-    return(list(score = QQ, q = q, q_ext = q_ext,
-                gene_scores_unscaled = gene_Q))
+    # return(list(score = QQ, q = q, q_ext = q_ext,
+    #             gene_scores_unscaled = gene_Q))
 }
