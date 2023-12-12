@@ -4,29 +4,30 @@
 #'on the asymptotic distribution of a mixture of \eqn{\chi^{2}}s using the saddlepoint
 #'method from \code{\link[survey]{pchisqsum}}, as per Chen & Lumley 20219 CSDA.
 #'
-#'@param y a numeric matrix of dim \code{g x n} containing the raw or normalized
-#'RNA-seq counts for g genes from \code{n} samples.
+#'@param y a numeric matrix of dim \code{p x n} containing the expression
+#'for \code{p} genes from \code{n} samples.
 #'
-#'@param x a numeric design matrix of dim \code{n x p} containing the \code{p}
-#'covariates to be adjusted for
+#'@param x a numeric design matrix of dim \code{n x q} containing the \code{q}
+#'covariates to be adjusted for.
 #'
 #'@param indiv a vector of length \code{n} containing the information for
 #'attributing each sample to one of the studied individuals. Coerced
-#'to be a \code{factor}.
+#'to be a \code{factor}. By default, it is assumed that each row represents a distinct individual.
 #'
 #'@param phi a numeric design matrix of size \code{n x K} containing the
-#'\code{K} longitudinal variables to be tested (typically a vector of time
-#'points or functions of time)
+#'\code{K} variables to be tested.
 #'
-#'@param w numeric matrix of dim \code{G x n} containing the weights for G genes from the \code{n}
-#'samples, corresponding to the inverse of the diagonal of the estimated
-#'covariance matrix of y. Default is \code{NULL}, in which case heteroskedasticity is not 
-#'taken into account. 
+#'@param w a vector of length \code{n} containing the weights for the \code{n}
+#'samples. Default is \code{NULL}, in which case heteroskedasticity is 
+#'not taken into account. 
 #'
-#'@param cor_structure a logical flag indicating whether gene-set level correlation
-#'structures are to be estimated as well as the heteroskedasticity weights. In this case, 
-#'generalised least squares is performed instead of weighted least squares to estimate 
-#'the centralised gene expression. Default is \code{TRUE}.
+#'@param Sigma a list of matrices giving the plug-in estimate of the intra-set and 
+#'inter-observational covariance structures, incorporating the heteroskedasticity weights
+#'(computed by the function GS_cor()). The list should be the same length as the number of 
+#'distinct individuals under study. Each element of the list corresponds to individual \code{i}'s 
+#'covariance matrix, and has dimension \code{n_{i} x n_{i}}, where \code{n_{i}} is the number 
+#'of samples corresponding to individual \code{i}. Default is \code{NULL}, in which case such 
+#'structures will not be taken into account. 
 #'
 #'@param Sigma_xi a matrix of size \code{K x K} containing the covariance matrix
 #'of the \code{K} random effects corresponding to \code{phi}.
@@ -95,47 +96,91 @@
 #'@importFrom matrixStats colVars
 #'
 #'@export
-vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w,
+vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w = NULL,
                          Sigma_xi = diag(ncol(phi)),
+                         Sigma = NULL, 
                          genewise_pvals = FALSE, homogen_traj = FALSE,
                          na.rm = FALSE) {
-
+    ## dimensions, formatting and validity checks------
+    if (sum(!is.finite(w)) > 0) {
+      stop("At least 1 non-finite weight in 'w'") # check weights are finite
+    }
+  
+    if (!is.null(Sigma)){
+      cor_structure = TRUE # set argument if Sigma provided
+    }
+  
+    if (cor_structure == TRUE & (sum(!is.finite(unlist(Sigma)))) > 0) {
+      stop("At least 1 non-finite covariance entry in Sigma") # check finite covariance entries
+    }
+  
+    stopifnot(is.matrix(y)) # check data is provided in matrix format
+    stopifnot(is.matrix(x))
+    stopifnot(is.matrix(phi))
+  
+    p <- nrow(y)  # the number of genes in the set
+    n <- ncol(y)  # the number of samples measured
+    q <- ncol(x)  # the number of covariates
+    K <- ncol(phi) # the number of test variables
+  
+    indiv <- as.factor(as.numeric(as.factor(indiv))) # converting indiv vector to numeric factor
+    n_indiv <- length(levels(indiv)) # number of individuals
+    n_i = (summary(indiv) %>% as.vector()) # number of observations per individual
+  
+    stopifnot(nrow(x) == n) # covariate matrix must have samples as rows
+    stopifnot(nrow(phi) == n) # test variable matrix must have samples as rows
+    stopifnot(length(indiv) == n) # vector of sample indices must have n elements
+  
+    if (is.null(w)){
+      w = matrix(1, nrow = p, ncol = n) # if no weights specified, heteroskedasticity not accounted for
+    } else {
+     stopifnot(nrow(w) == p | ncol(w) == n) # else weights must have column samples and row genes
+    }
+    if (cor_structure == TRUE){
+      stopifnot(length(Sigma) == n_indiv) # check correct number of covariance matrices
+      stopifnot(all(unlist(lapply(lapply(Sigma, dim), `[[`, 1)) == n_i*p))
+    # check correct dimensions of all covariance matrices
+    }
+  
+  # the number of random effects
+    if (length(Sigma_xi) == 1) {
+      K <- 1
+      Sigma_xi <- matrix(Sigma_xi, K, K)
+    } else {
+      K <- nrow(Sigma_xi)
+      stopifnot(ncol(Sigma_xi) == K)
+    }
+    stopifnot(K == K)
+    
     if (homogen_traj) {
         score_list <- vc_score_h(y = y, x = x, indiv = factor(indiv), phi = phi,
-                                 w = w, Sigma_xi = Sigma_xi, na_rm = na.rm)
+                                 w = w, Sigma_xi = Sigma_xi, na.rm = na.rm)
     } else {
         score_list <- vc_score(y = y, x = x, indiv = factor(indiv), phi = phi,
-                               w = w, Sigma_xi = Sigma_xi, na_rm = na.rm)
+                               w = w, Sigma = Sigma , Sigma_xi = Sigma_xi, na.rm = na.rm)
     }
 
-    nindiv <- nrow(score_list$q_ext)
-    g <- nrow(y)
-    n <- ncol(y)
-    nphi <- ncol(phi)
-    
-    if (w = NULL){
-      w <- matrix(1, nrow = g, ncol = n) # if no weights specified, heteroskedasticity not accounted for
-    }
-
-    if (g * nindiv < 1) {
+    if (p * n_indiv < 1) {
         stop("no gene measured/no sample included ...")
     }
 
     if (genewise_pvals) {
         gene_scores_obs <- score_list$gene_scores_unscaled
-        if (nindiv == 1) {
+        if (n_indiv == 1) {
             pv <- stats::pchisq(gene_scores_obs, df = 1, lower.tail = FALSE)
-        } else if (nphi == 1) {
-          gene_lambda <- matrixStats::colVars(score_list$q_ext)
+        } else if (K == 1) {
+          #gene_lambda <- matrixStats::colVars(score_list$q_ext)
+          gene_lambda <- matrixStats::colVars(t(score_list$Q_indiv))
           pv <- stats::pchisq(gene_scores_obs/gene_lambda, df = 1,
                               lower.tail = FALSE)
         } else {
-            gene_inds <- lapply(seq_len(g), function(x) {
-                x + (g) * (seq_len(nphi) - 1)
+            gene_inds <- lapply(seq_len(p), function(x) {
+                x + (p) * (seq_len(K) - 1)
             })
 
             gene_lambda <- lapply(gene_inds, function(x) {
-                Sig_q_gene <- cov(score_list$q_ext[, x, drop = FALSE])
+                #Sig_q_gene <- cov(score_list$q_ext[, x, drop = FALSE])
+                Sig_q_gene <- cov(score_list$Q_indiv[, x, drop = FALSE])
                 lam <- tryCatch(eigen(Sig_q_gene, symmetric = TRUE, only.values = TRUE)$values,
                                 error=function(cond){return(NULL)}
                 )
@@ -177,22 +222,30 @@ vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w,
 
     } else {
 
-        if (nindiv == 1) {
-            Sig_q <- matrix(1, g, g)
+        if (n_indiv == 1) {
+            Gamma <- matrix(1, p, p)
         } else {
-            Sig_q <- cov(score_list$q_ext)
+          #Gamma <- cov(score_list$q_ext)
+          Q_bar = (1/n_indiv)*rowSums(score_list$Q_indiv) # mean vector 
+          Q_list = vector("list", n_indiv) #list to store p times p individual contritubion matrices
+          for (i in c(1:n_indiv)){
+            Q_list[[i]] = tcrossprod((score_list$Q_indiv[,i] - Q_bar))
+          }
+          Gamma = (1/n_indiv)*Reduce('+', Q_list) # scaled estimated covariance matrix of 
+                                                  # individual-level contributions
+          
         }
 
-        lam <- tryCatch(eigen(Sig_q, symmetric = TRUE, only.values = TRUE)$values,
-                        error=function(cond){return(NULL)}
+        lam <- tryCatch(eigen(Gamma, symmetric = TRUE, only.values = TRUE)$values,
+                        error=function(cond){return(NULL)} #estimated eigenvalues
         )
         if (is.null(lam)) {
-            lam <- tryCatch(svd(Sig_q)$d,
+            lam <- tryCatch(svd(Gamma)$d,
                             error=function(cond){return(NULL)}
             )
         }
         if (is.null(lam)) {
-            lam <- tryCatch(svd(round(Sig_q, 6))$d,
+            lam <- tryCatch(svd(round(Gamma, 6))$d,
                             error=function(cond){
                                 stop("SVD decomposition failed")
                             })
@@ -202,7 +255,7 @@ vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w,
                                     df=1,
                                     a = lam,
                                     lower.tail = FALSE,
-                                    method = "saddlepoint")
+                                    method = "saddlepoint") # estimated p value
 
         ans <- list("set_score_obs" = score_list$score,
                     "set_pval" = dv)

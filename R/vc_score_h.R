@@ -31,7 +31,7 @@
 #'@param Sigma_xi a matrix of size \code{K x K} containing the covariance matrix
 #'of the \code{K} random effects corresponding to \code{phi}.
 #'
-#'@param na_rm logical: should missing values (including \code{NA} and
+#'@param na.rm logical: should missing values (including \code{NA} and
 #'\code{NaN}) be omitted from the calculations? Default is \code{FALSE}.
 #'
 #'@return A list with the following elements:\itemize{
@@ -100,7 +100,7 @@
 #'
 #'@export
 vc_score_h <- function(y, x, indiv, phi, w, Sigma_xi = diag(ncol(phi)),
-                       Sigma = NULL, na_rm = FALSE) {
+                       Sigma = NULL, na.rm = FALSE) {
 
     ## validity checks
     if (sum(!is.finite(w)) > 0) {
@@ -176,7 +176,7 @@ vc_score_h <- function(y, x, indiv, phi, w, Sigma_xi = diag(ncol(phi)),
     # have homogeneous effects across genes in the set, so a singular alpha is
     # calculated for each covariate.
     
-    alpha <- solve(crossprod(x)) %*% t(x) %*% rowMeans(y_T, na.rm = na_rm)
+    alpha <- solve(crossprod(x)) %*% t(x) %*% rowMeans(y_T, na.rm = na.rm)
     yt_mu <- y_T - do.call(cbind, replicate(g, x %*% alpha, simplify = FALSE))
 
 
@@ -229,7 +229,7 @@ vc_score_h <- function(y, x, indiv, phi, w, Sigma_xi = diag(ncol(phi)),
         indiv_mat <- matrix(as.numeric(indiv), ncol = 1)
     }
 
-    if (na_rm & sum(is.na(q_fast)) > 0) {
+    if (na.rm & sum(is.na(q_fast)) > 0) {
         q_fast[is.na(q_fast)] <- 0 # setting na values to 0 if specfied
     }
     
@@ -239,13 +239,13 @@ vc_score_h <- function(y, x, indiv, phi, w, Sigma_xi = diag(ncol(phi)),
     avg_xtx_inv_tx <- nb_indiv * tcrossprod(solve(crossprod(x, x)), x)
     U_XT <- matrix(yt_mu, ncol = g * n_t, nrow = n) *
         crossprod(avg_xtx_inv_tx, XT_fast)
-    if (na_rm & sum(is.na(U_XT)) > 0) {
+    if (na.rm & sum(is.na(U_XT)) > 0) {
         U_XT[is.na(U_XT)] <- 0
     }
     U_XT_indiv <- crossprod(indiv_mat, U_XT)
     q_ext <- q - U_XT_indiv
 
-    qq <- colSums(q, na.rm = na_rm)^2/nb_indiv
+    qq <- colSums(q, na.rm = na.rm)^2/nb_indiv
 
     gene_Q <- rowSums(matrix(qq, ncol = K))
 
