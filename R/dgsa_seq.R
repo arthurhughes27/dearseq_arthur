@@ -387,7 +387,7 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
     cov_variables2test_eff <- diag(ncol(phi))
   }
 
-  # checking for 0 variance genes
+  # checking for 0  variance genes
   v_g <- matrixStats::rowVars(y, na.rm = TRUE)
   if(sum(v_g == 0) > 0){
     warning("Removing ", sum(v_g == 0), " genes with 0 variance from ",

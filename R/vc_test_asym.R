@@ -181,14 +181,16 @@ vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w = NULL,
     if (p * n_indiv < 1) {
         stop("no gene measured/no sample included ...")
     }
-
+    
+    Q_indiv = t(score_list$q)
+    
     if (genewise_pvals) {
         gene_scores_obs <- score_list$gene_scores_unscaled
         if (n_indiv == 1) {
             pv <- stats::pchisq(gene_scores_obs, df = 1, lower.tail = FALSE)
         } else if (K == 1) {
-          #gene_lambda <- matrixStats::colVars(score_list$q_ext)
-          gene_lambda <- matrixStats::colVars(t(score_list$Q_indiv))
+          gene_lambda <- matrixStats::colVars(score_list$q_ext)
+          #gene_lambda <- matrixStats::colVars(score_list$q)
           pv <- stats::pchisq(gene_scores_obs/gene_lambda, df = 1,
                               lower.tail = FALSE)
         } else {
@@ -197,8 +199,7 @@ vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w = NULL,
             })
 
             gene_lambda <- lapply(gene_inds, function(x) {
-                #Sig_q_gene <- cov(score_list$q_ext[, x, drop = FALSE])
-                Sig_q_gene <- cov(score_list$Q_indiv[, x, drop = FALSE])
+                Sig_q_gene <- cov(Q_indiv[, x, drop = FALSE])
                 lam <- tryCatch(eigen(Sig_q_gene, symmetric = TRUE, only.values = TRUE)$values,
                                 error=function(cond){return(NULL)}
                 )
@@ -243,15 +244,15 @@ vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w = NULL,
         if (n_indiv == 1) {
             Gamma <- matrix(1, p, p)
         } else {
-          #Gamma <- cov(score_list$q_ext)
-          Q_bar = (1/n_indiv)*rowSums(score_list$Q_indiv) # mean vector 
-          Q_list = vector("list", n_indiv) #list to store p times p individual contritubion matrices
-          for (i in c(1:n_indiv)){
-            Q_list[[i]] = tcrossprod((score_list$Q_indiv[,i] - Q_bar))
-          }
-          Gamma = (1/n_indiv)*Reduce('+', Q_list) # scaled estimated covariance matrix of 
-                                                  # individual-level contributions
+          # Q_bar = (1/n_indiv)*rowSums(Q_indiv) # mean vector 
+          # Q_list = vector("list", n_indiv) #list to store p times p individual contritubion matrices
+          # for (i in c(1:n_indiv)){
+          #   Q_list[[i]] = tcrossprod((Q_indiv[,i] - Q_bar))
+          # }
+          # Gamma = (1/n_indiv)*Reduce('+', Q_list) # scaled estimated covariance matrix of 
+          #                                         # individual-level contributions
           
+          Gamma = cov(score_list$q_ext)
         }
 
         lam <- tryCatch(eigen(Gamma, symmetric = TRUE, only.values = TRUE)$values,

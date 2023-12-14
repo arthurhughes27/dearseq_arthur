@@ -1,7 +1,8 @@
 #'Computes variance component score test statistics
 #'
-#'This function computes the variance component score test statistics taking into account
-#'heteroskedasticity, intra-gene set correlation structures and intra-individual correlation.
+#'This function computes the variance component score test statistics for a set 
+#'taking into account heteroskedasticity, intra-gene set correlation structures 
+#'and intra-individual correlation.
 #'
 #'@keywords internal
 #'
@@ -155,6 +156,7 @@ vc_score <- function(y, x, indiv = c(1:ncol(y)), phi, w = NULL, Sigma_xi = NULL,
     
     sigma_inv = vector("list", n_indiv) # List to store the inverted covariance matrices
     Q_indiv = matrix(0,nrow = p*K, ncol = n_indiv) #matrix for individual level contributions
+    T_fast = matrix(0,nrow = p*K, ncol = n_indiv)
     for (i in c(1:n_indiv)){ 
       # Test variable matrix in block diag form
       if (n_i[i] == 1){
@@ -181,14 +183,39 @@ vc_score <- function(y, x, indiv = c(1:ncol(y)), phi, w = NULL, Sigma_xi = NULL,
         # (weights are already inverse variances)
       }
       
-      Q_indiv[,i] = crossprod((y_mui),sigma_inv[[i]]) %*% phi_diag 
+      Q_indiv[,i] = crossprod((y_mui),sigma_inv[[i]]) %*% phi_diag
+    }
+    q = t(Q_indiv)
+    qq <- colSums(q, na.rm = na.rm)^2/n_indiv  # genewise, variable specific scores
+    gene_Q <- rowSums(matrix(qq, ncol = K))  # gene scores
+    Q <- sum(qq)  #n_indiv=nrow(q) # set score
+    
+    sig_xi_sqrt <- (Sigma_xi * diag(K)) ^ (-0.5)
+    sig_eps_inv_T <- t(w)
+    
+    phi_sig_xi_sqrt <- phi %*% sig_xi_sqrt # =phi
+    
+    T_fast <- do.call(cbind, replicate(K, sig_eps_inv_T, simplify = FALSE)) *
+      matrix(apply(phi_sig_xi_sqrt, 2, rep, p), ncol = p * K)
+    
+    XT_fast <- crossprod(x, T_fast)/n_indiv  # Covariate contributions?
+    avg_xtx_inv_tx <- n_indiv * tcrossprod(solve(crossprod(x, x)), x)
+    U_XT <- matrix(yt_mu, ncol = p * K, nrow = n) *
+      crossprod(avg_xtx_inv_tx, XT_fast)
+    if (na.rm & sum(is.na(U_XT)) > 0) {
+      U_XT[is.na(U_XT)] <- 0
     }
     
-    q_col = n_indiv^{-1/2}*rowSums(Q_indiv)
-    Q = crossprod(q_col)
-    gene_Q_unscaled = rowSums(Q_indiv) # pay attention to case with >1 testing variable 
+    if (length(levels(indiv)) > 1) {
+      indiv_mat <- stats::model.matrix(~0 + factor(indiv))
+    } else {
+      indiv_mat <- matrix(as.numeric(indiv), ncol = 1)
+    }
     
-    return(list(score = Q, Q_indiv = Q_indiv, gene_scores_unscaled = gene_Q_unscaled))
+    U_XT_indiv <- crossprod(indiv_mat, U_XT)
+    q_ext <- q - U_XT_indiv
+  
+    return(list(score = Q, q = q, q_ext = q_ext, gene_scores_unscaled = gene_Q))
     
     # 
     # sigma_inv = vector("list", n_indiv) # List to store the inverted covariance matrices
@@ -248,34 +275,34 @@ vc_score <- function(y, x, indiv = c(1:ncol(y)), phi, w = NULL, Sigma_xi = NULL,
     # 
     # return(list(score = Q, Q_indiv = Q_indiv, gene_scores_unscaled = gene_Q_unscaled))
     
-    # Blocked out by arthur
+    #Blocked out by arthur
     # sig_xi_sqrt <- (Sigma_xi * diag(K)) ^ (-0.5)
     # sig_eps_inv_T <- t(w)
-    #
+    # 
     # phi_sig_xi_sqrt <- phi %*% sig_xi_sqrt
-    #
-    # T_fast <- do.call(cbind, replicate(K, sig_eps_inv_T, simplify = FALSE)) *
+    # 
+    # T_fast2 <- do.call(cbind, replicate(K, sig_eps_inv_T, simplify = FALSE)) *
     #     matrix(apply(phi_sig_xi_sqrt, 2, rep, p), ncol = p * K)
     # ##---------------------
     # ## the structure of T_fast is time_basis_1*gene_1, time_basis_1*gene_2, ...,
     # ## time_basis_1*gene_p, ..., time_basis_K*gene_1, ..., time_basis_K*gene_p
     # ##----------------------------
-    # q_fast <- matrix(yt_mu, ncol = p * K, nrow = n) * T_fast #observation level contributions
-    #
+    # q_fast2 <- matrix(yt_mu, ncol = p * K, nrow = n) * T_fast #observation level contributions
+    # 
     # ## dplyr seems to be less efficient here
     # ## q_fast_tb <- tibble::as_tibble(cbind.data.frame(indiv, q_fast))
     # ## q_dp <- q_fast_tb %>% group_by(indiv) %>% summarise_all(sum)
-    #
+    # 
     # ## aggregate is much slower also
     # ## qtemp <- aggregate(. ~ indiv, cbind.data.frame(indiv, q_fast), sum)
     # ## qtemp <- aggregate(. ~ indiv, cbind.data.frame(indiv, q_fast), sum)
-    #
+    # 
     # ## data.table hard to test, but seems to be at least 10 times slower on big
     # ## datasets (weird)
     # ## m_dt <- data.table('indiv'=factor(rep(c(1:20), each=5)), mbig)
     # ## temp <- m_dt[, lapply(.SD, sum), by=indiv]
-    #
-    #
+    # 
+    # 
     # # the 2 'by' statements below used to represent the longest AND most memory
     # # intensive part of this for genewise analysis:
     # if (length(levels(indiv)) > 1) {
@@ -283,34 +310,32 @@ vc_score <- function(y, x, indiv = c(1:ncol(y)), phi, w = NULL, Sigma_xi = NULL,
     # } else {
     #     indiv_mat <- matrix(as.numeric(indiv), ncol = 1)
     # }
-    #
+    # 
     # if (na.rm & sum(is.na(q_fast)) > 0) {
     #     q_fast[is.na(q_fast)] <- 0
     # }
-    # q <- crossprod(indiv_mat, q_fast) #individual level contributions
-    # XT_fast <- crossprod(x, T_fast)/n_indiv  # Covariate contributions? 
-    # avg_xtx_inv_tx <- n_indiv * tcrossprod(solve(crossprod(x, x)), x)
-    # U_XT <- matrix(yt_mu, ncol = p * K, nrow = n) *
-    #     crossprod(avg_xtx_inv_tx, XT_fast)
-    # if (na.rm & sum(is.na(U_XT)) > 0) {
-    #     U_XT[is.na(U_XT)] <- 0
+    # q2 <- crossprod(indiv_mat, q_fast) #individual level contributions
+    # XT_fast2 <- crossprod(x, T_fast2)/n_indiv  # Covariate contributions?
+    # avg_xtx_inv_tx2 <- n_indiv * tcrossprod(solve(crossprod(x, x)), x)
+    # U_XT2 <- matrix(yt_mu, ncol = p * K, nrow = n) *
+    #     crossprod(avg_xtx_inv_tx2, XT_fast2)
+    # if (na.rm & sum(is.na(U_XT2)) > 0) {
+    #     U_XT2[is.na(U_XT2)] <- 0
     # }
-    # U_XT_indiv <- crossprod(indiv_mat, U_XT)
-    # q_ext <- q - U_XT_indiv
+    # U_XT_indiv2 <- crossprod(indiv_mat, U_XT2)
+    # q_ext2 <- q2 - U_XT_indiv2
     # # sapply(1:6, function(i){(q_ext[i,] - q_ext_fast_indiv[i,])})
-    #
-    #
-    #
-    # qq <- colSums(q, na.rm = na.rm)^2/n_indiv  # genewise, variable specific scores
-    #
+    # 
+    # qq2 <- colSums(q2, na.rm = na.rm)^2/n_indiv  # genewise, variable specific scores
+    # 
     # ##qq <- unlist(by(data=matrix(qq, ncol=1), INDICES=rep(1:p, K), FUN=sum,
     # ##                simplify = FALSE)) # veryslow
     # ## gene_inds <- lapply(1:p, function(x){x + (p)*(0:(K-1))})
     # ## gene_Q <- sapply(gene_inds, function(x) sum(qq[x])) # old computation
     # ## gene_Q <- tcrossprod(qq, matrix(diag(p), nrow=p, ncol=p*K))[1, ] # faster
-    # gene_Q <- rowSums(matrix(qq, ncol = K))  # gene scores
-    #
-    # QQ <- sum(qq)  #n_indiv=nrow(q) # set score
+    # gene_Q2 <- rowSums(matrix(qq2, ncol = K))  # gene scores
+    # 
+    # Q2 <- sum(qq2)  #n_indiv=nrow(q) # set score
 
     # return(list(score = QQ, q = q, q_ext = q_ext,
     #             gene_scores_unscaled = gene_Q))
