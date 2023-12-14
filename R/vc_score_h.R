@@ -5,28 +5,30 @@
 #'
 #'@keywords internal
 #'
-#'@param y a numeric matrix of dim \code{g x n} containing the raw or
-#'normalized RNA-seq counts for g genes from \code{n} samples.
+#'@param y a numeric matrix of dim \code{p x n} containing the expression
+#'for \code{p} genes from \code{n} samples.
 #'
-#'@param x a numeric design matrix of dim \code{n x p} containing the \code{p}
+#'@param x a numeric design matrix of dim \code{n x q} containing the \code{q}
 #'covariates to be adjusted for.
 #'
 #'@param indiv a vector of length \code{n} containing the information for
 #'attributing each sample to one of the studied individuals. Coerced
-#'to be a \code{factor}.
+#'to be a \code{factor}. By default, it is assumed that each row represents a distinct individual.
 #'
 #'@param phi a numeric design matrix of size \code{n x K} containing the
-#'\code{K} variables to be tested (typically a vector of time
-#'points or functions of time).
+#'\code{K} variables to be tested.
 #'
 #'@param w a vector of length \code{n} containing the weights for the \code{n}
-#'samples, corresponding to the inverse of the diagonal of the estimated
-#'covariance matrix of y.
+#'samples. Default is \code{NULL}, in which case heteroskedasticity is 
+#'not taken into account.
 #'
-#'@param Sigma a list of \code{n} matrices of size \code{g x g} giving the within-set
-#'gene-gene correlation structure and heteroskedasticity weights (computed by
-#'the function GS_cor()). Default is \code{NULL}, in which case such structures will
-#'not be taken into account. 
+#'@param Sigma a list of matrices giving the plug-in estimate of the intra-set and 
+#'inter-observational covariance structures, incorporating the heteroskedasticity weights
+#'(computed by the function GS_cor()). The list should be the same length as the number of 
+#'distinct individuals under study. Each element of the list corresponds to individual \code{i}'s 
+#'covariance matrix, and has dimension \code{n_{i} x n_{i}}, where \code{n_{i}} is the number 
+#'of samples corresponding to individual \code{i}. Default is \code{NULL}, in which case such 
+#'structures will not be taken into account. 
 #'
 #'@param Sigma_xi a matrix of size \code{K x K} containing the covariance matrix
 #'of the \code{K} random effects corresponding to \code{phi}.
@@ -37,9 +39,10 @@
 #'@return A list with the following elements:\itemize{
 #'   \item \code{score}: approximation of the set observed score
 #'   \item \code{q}: observation-level contributions to the score
-#'   \item \code{q_ext}: pseudo-observations used to compute covariance
-#'   taking into account the contributions of OLS estimates
-#'   \item \code{gene_scores}: approximation of the individual gene scores
+#'   \item \code{q_ext}: pseudo-observations used to compute the covariance,
+#'    taking into account the contributions of OLS estimates
+#'   \item \code{gene_scores_unscaled}: a vector of the approximations of the
+#'   individual gene scores
 #' }
 #'
 #'
@@ -99,56 +102,59 @@
 #'scoreTest_heterogen$set_pval
 #'
 #'@export
-vc_score_h <- function(y, x, indiv, phi, w, Sigma_xi = diag(ncol(phi)),
-                       Sigma = NULL, na.rm = FALSE) {
+vc_score_h <- function(y, x, indiv = c(1:ncol(y)), phi, w = NULL, Sigma_xi = diag(ncol(phi)),
+                     Sigma = NULL, na.rm = FALSE) {
 
-    ## validity checks
+    ## dimensions, formatting and validity checks------
     if (sum(!is.finite(w)) > 0) {
-        stop("At least 1 non-finite weight in 'w'")
+     stop("At least 1 non-finite weight in 'w'") # check weights are finite
     }
-    
+  
     if (!is.null(Sigma)){
       cor_structure = TRUE # set argument if Sigma provided
     }
   
     if (cor_structure == TRUE & (sum(!is.finite(unlist(Sigma)))) > 0) {
-      stop("At least 1 non-finite covariance entry in Sigma")
+     stop("At least 1 non-finite covariance entry in Sigma") # check finite covariance entries
     }
-
-    ## dimensions check------
-
-    stopifnot(is.matrix(y))
+  
+    stopifnot(is.matrix(y)) # check data is provided in matrix format
     stopifnot(is.matrix(x))
     stopifnot(is.matrix(phi))
-
-    g <- nrow(y)  # the number of genes measured
+  
+    p <- nrow(y)  # the number of genes in the set
     n <- ncol(y)  # the number of samples measured
-    p <- ncol(x)  # the number of covariates
-    n_t <- ncol(phi)  # the number of time bases
-    stopifnot(nrow(x) == n)
-    stopifnot(nrow(w) == g)
-    stopifnot(ncol(w) == n)
-    stopifnot(nrow(phi) == n)
-    stopifnot(length(indiv) == n)
+    q <- ncol(x)  # the number of covariates
+    K <- ncol(phi) # the number of test variables
+  
+    indiv <- as.factor(as.numeric(as.factor(indiv))) # converting indiv vector to numeric factor
+    n_indiv <- length(levels(indiv)) # number of individuals
+    n_i = (summary(indiv) %>% as.vector()) # number of observations per individual
+  
+    stopifnot(nrow(x) == n) # covariate matrix must have samples as rows
+    stopifnot(nrow(phi) == n) # test variable matrix must have samples as rows
+    stopifnot(length(indiv) == n) # vector of sample indices must have n elements
+  
+    if (is.null(w)){
+     w = matrix(1, nrow = p, ncol = n) # if no weights specified, heteroskedasticity not accounted for
+    } else {
+      stopifnot(nrow(w) == p | ncol(w) == n) # else weights must have column samples and row genes
+    }
     if (cor_structure == TRUE){
-    stopifnot(length(Sigma) == n)
-    stopifnot(all(unlist(lapply(Sigma, dim)) == g)) # all covariance matrices should be gxg
+      stopifnot(length(Sigma) == n_indiv) # check correct number of covariance matrices
+      stopifnot(all(unlist(lapply(lapply(Sigma, dim), `[[`, 1)) == n_i*p))
+      # check correct dimensions of all covariance matrices
     }
   
     # the number of random effects
     if (length(Sigma_xi) == 1) {
-        K <- 1
-        Sigma_xi <- matrix(Sigma_xi, K, K)
+     K <- 1
+     Sigma_xi <- matrix(Sigma_xi, K, K)
     } else {
-        K <- nrow(Sigma_xi)
-        stopifnot(ncol(Sigma_xi) == K)
+     K <- nrow(Sigma_xi)
+      stopifnot(ncol(Sigma_xi) == K)
     }
-    stopifnot(n_t == K)
-
-
-    ## data formating ------
-    indiv <- as.factor(indiv)
-    nb_indiv <- length(levels(indiv))
+    stopifnot(K == K)
 
     y_T <- t(y)
 
@@ -159,9 +165,9 @@ vc_score_h <- function(y, x, indiv, phi, w, Sigma_xi = diag(ncol(phi)),
     ##      x_i <- x[select,]
     ##      y_i <- y_T[select,]
     ##      phi_i <- phi[select,]
-    ##      Phi_list[[i]] <- do.call(rbind, replicate(g, phi_i,
+    ##      Phi_list[[i]] <- do.call(rbind, replicate(p, phi_i,
     ##                               simplify = FALSE))
-    ##      x_tilde_list[[i]] <- matrix(data=rep(x_i, each=g), ncol = p)
+    ##      x_tilde_list[[i]] <- matrix(data=rep(x_i, each=p), ncol = p)
     ##      y_tilde_list[[i]] <- matrix(y_i, ncol=1) }
     ## x_tilde <- do.call(rbind, x_tilde_list)
     ## y_tilde <- o.call(rbind, y_tilde_list)
@@ -177,7 +183,7 @@ vc_score_h <- function(y, x, indiv, phi, w, Sigma_xi = diag(ncol(phi)),
     # calculated for each covariate.
     
     alpha <- solve(crossprod(x)) %*% t(x) %*% rowMeans(y_T, na.rm = na.rm)
-    yt_mu <- y_T - do.call(cbind, replicate(g, x %*% alpha, simplify = FALSE))
+    yt_mu <- y_T - do.call(cbind, replicate(p, x %*% alpha, simplify = FALSE))
 
 
     ## test statistic computation ------
@@ -185,7 +191,7 @@ vc_score_h <- function(y, x, indiv, phi, w, Sigma_xi = diag(ncol(phi)),
     # sig_xi_sqrt <- (Sigma_xi %^% (-0.5))
 
     ## xtx_inv <- solve(t(x_tilde) %*% x_tilde)
-    ## long_indiv <- rep(indiv, each = g)
+    ## long_indiv <- rep(indiv, each = p)
     ## q <- matrix(NA, nrow=nb_indiv, ncol=K)
     ## XT_i <- array(NA, c(nb_indiv, p, K))
     ## U <- matrix(NA, nrow = nb_indiv, ncol = p)
@@ -208,16 +214,16 @@ vc_score_h <- function(y, x, indiv, phi, w, Sigma_xi = diag(ncol(phi)),
       sig_eps_inv_T <- t(w)
       phi_sig_xi_sqrt <- phi %*% sig_xi_sqrt
       T_fast <- do.call(cbind, replicate(K, sig_eps_inv_T, simplify = FALSE)) * # element-wise multiplication
-        matrix(apply(phi_sig_xi_sqrt, 2, rep, g), ncol = g * K)
+        matrix(apply(phi_sig_xi_sqrt, 2, rep, p), ncol = p * K)
       q_fast <- do.call(cbind, replicate(K, yt_mu, simplify = FALSE)) * T_fast # observation-level contributions
     } else {
         T_fast_list = vector("list", n)    
-        q_fast = matrix(ncol = g, nrow = n)
+        q_fast = matrix(ncol = p, nrow = n)
         for (i in c(1:n)){
-          T_fast_list[[i]] = matrix(ncol = g, nrow = g)
+          T_fast_list[[i]] = matrix(ncol = p, nrow = p)
           sig_eps_inv_T = Sigma[[i]]
           phi_sig_xi_sqrt <- phi[i] %*% sig_xi_sqrt
-          phi_diag = t(as.matrix(bdiag(rep(list(phi_sig_xi_sqrt), g))))
+          phi_diag = t(as.matrix(bdiag(rep(list(phi_sig_xi_sqrt), p))))
           T_fast_list[[i]] <- sig_eps_inv_T %*% phi_diag
           q_fast[i,] = yt_mu[i,] %*% sig_eps_inv_T %*% phi_diag # observation level contributions  
       }
@@ -237,7 +243,7 @@ vc_score_h <- function(y, x, indiv, phi, w, Sigma_xi = diag(ncol(phi)),
     
     XT_fast <- t(x) %*% T_fast/nb_indiv
     avg_xtx_inv_tx <- nb_indiv * tcrossprod(solve(crossprod(x, x)), x)
-    U_XT <- matrix(yt_mu, ncol = g * n_t, nrow = n) *
+    U_XT <- matrix(yt_mu, ncol = p * n_t, nrow = n) *
         crossprod(avg_xtx_inv_tx, XT_fast)
     if (na.rm & sum(is.na(U_XT)) > 0) {
         U_XT[is.na(U_XT)] <- 0

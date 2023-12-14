@@ -102,21 +102,31 @@ vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w = NULL,
                          genewise_pvals = FALSE, homogen_traj = FALSE,
                          na.rm = FALSE) {
     ## dimensions, formatting and validity checks------
-    if (sum(!is.finite(w)) > 0) {
-      stop("At least 1 non-finite weight in 'w'") # check weights are finite
-    }
-  
-    if (!is.null(Sigma)){
-      cor_structure = TRUE # set argument if Sigma provided
-    }
-  
-    if (cor_structure == TRUE & (sum(!is.finite(unlist(Sigma)))) > 0) {
-      stop("At least 1 non-finite covariance entry in Sigma") # check finite covariance entries
-    }
-  
-    stopifnot(is.matrix(y)) # check data is provided in matrix format
+    
+    # check data is provided in matrix format
+    stopifnot(is.matrix(y)) 
     stopifnot(is.matrix(x))
     stopifnot(is.matrix(phi))
+    
+    # Logical flag if sigma matrices given
+    if (!is.null(Sigma)){
+      cor_structure = TRUE 
+    } else {
+      cor_structure = FALSE
+    }
+  
+    #Checking for finiteness of Sigma matrix entries 
+    if (cor_structure == TRUE & (sum(!is.finite(unlist(Sigma)))) > 0) {
+      stop("At least 1 non-finite covariance entry in Sigma")
+    }
+
+    #Checking for singularity of Sigma matrices using SVD
+    if(cor_structure == TRUE & any(unlist(lapply(Sigma, 
+                                                FUN = function(x){any(svd(x)$d < 1e-10)})))){
+      message("At least one singular covariance matrix for a geneset. \n",
+              "Will not incorporate correlation structures into estimation for this gene set. \n")
+      cor_structure = FALSE 
+    }
   
     p <- nrow(y)  # the number of genes in the set
     n <- ncol(y)  # the number of samples measured
@@ -130,16 +140,23 @@ vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w = NULL,
     stopifnot(nrow(x) == n) # covariate matrix must have samples as rows
     stopifnot(nrow(phi) == n) # test variable matrix must have samples as rows
     stopifnot(length(indiv) == n) # vector of sample indices must have n elements
-  
+    
+    
     if (is.null(w)){
       w = matrix(1, nrow = p, ncol = n) # if no weights specified, heteroskedasticity not accounted for
     } else {
      stopifnot(nrow(w) == p | ncol(w) == n) # else weights must have column samples and row genes
     }
+    
+    # Check finiteness of weights
+    if (sum(!is.finite(w)) > 0) {
+      stop("At least 1 non-finite weight in 'w'") 
+    }
+    
+    # Check correct number and dimensions of covariance matrices 
     if (cor_structure == TRUE){
-      stopifnot(length(Sigma) == n_indiv) # check correct number of covariance matrices
+      stopifnot(length(Sigma) == n_indiv)
       stopifnot(all(unlist(lapply(lapply(Sigma, dim), `[[`, 1)) == n_i*p))
-    # check correct dimensions of all covariance matrices
     }
   
   # the number of random effects
@@ -152,6 +169,7 @@ vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w = NULL,
     }
     stopifnot(K == K)
     
+    # Call score function
     if (homogen_traj) {
         score_list <- vc_score_h(y = y, x = x, indiv = factor(indiv), phi = phi,
                                  w = w, Sigma_xi = Sigma_xi, na.rm = na.rm)

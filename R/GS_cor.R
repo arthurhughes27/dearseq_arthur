@@ -145,8 +145,11 @@ GS_cor <- function(y, x, phi = NULL, indiv, w = NULL, use_phi = TRUE, preprocess
   #Plug in estimator of covariance matrix incorporating weights
   sigma_list = vector("list", n_indiv) #store individual covariance matrices
   for (i in c(1:n_indiv)){ #for all individuals
-    w_i = w[,indiv == i] 
-    wcol = matrix(w_i, ncol = 1) # CHECK THIS
+    wcol = matrix(0,nrow = p*n_i[i])
+    for (g in c(1:p)){
+      wcol[c(((g-1)*n_i[i]+1):(g*n_i[i]))] = w[g,indiv == i]
+    }
+    
     sigma_list[[i]] = matrix(0, ncol = p*n_i[i], nrow = p*n_i[i]) # initialise matrices
     for (j in c(1:(p*n_i[i]))){
       sigma_list[[i]][,j] = P[c(1:(n_i[i]*p)),j]*wcol[j]^{-1/2}*wcol^{-1/2} # ith covariance matrix

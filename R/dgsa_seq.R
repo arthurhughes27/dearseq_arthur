@@ -78,6 +78,11 @@
 #'performed). Default is \code{'loclin'}.
 #'See \code{\link{sp_weights}} and \code{\link{voom_weights}} for details.
 #'
+#'@param cor_structure a logical flag indicating whether the intra-gene set, intra-individual
+#'correlation structures should be estimated from the data and incorporated into the 
+#'covariance matrices for the residual errors. Default is \code{FALSE}, in which case
+#'these structures are not estimated.
+#'
 #'@param which_test a character string indicating which method to use to
 #'approximate the variance component score test, either \code{'permutation'} or
 #'\code{'asymptotic'}. Default is \code{'permutation'}.
@@ -258,6 +263,7 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                      cov_variables2test_eff = NULL,
                      which_test = c("permutation", "asymptotic"),
                      which_weights = c("loclin", "voom", "none"),
+                     cor_structure = FALSE,
                      n_perm = 1000, progressbar = TRUE, parallel_comp = TRUE,
                      nb_cores = parallel::detectCores(logical=FALSE) - 1,
                      preprocessed = FALSE,
@@ -505,7 +511,6 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
   }
   w <- w_full$weights
 
-
   if (is.null(genesets)) {
     if (verbose) {
       message("'genesets' argument not provided => only gene-wise ",
@@ -597,6 +602,12 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
     }
 
     if (is(genesets[[1]], "character")) {
+      
+      if(length(unlist(genesets)) != length(unlist(lapply(genesets, unique)))){
+        warning("Some gene sets contain repeated gene names - removing duplicates. \n")
+        genesets = lapply(genesets, unique)
+      }
+      
       if (is.null(rownames(y_lcpm))) {
         stop("Gene sets specified as character but no rownames ",
              "available for the expression matrix")
@@ -625,13 +636,29 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                       error=function(cond){return(NULL)})
         if (length(e) < 1) {
           warning("Gene set ", i_gs, " contains 0 measured ",
-                  "transcript: associated p-value cannot ",
+                  "transcripts: associated p-value cannot ",
                   "be computed")
           NA
         } else {
+          
+          if (cor_structure == TRUE){
+            Sigma = GS_cor(y = y_lcpm[gs, , drop = FALSE], 
+                           x = x, 
+                           phi = phi, 
+                           indiv = sample_group, 
+                           w = w[gs, , drop = FALSE], 
+                           preprocessed = preprocessed, 
+                           use_phi = weights_var2test_condi, 
+                           na.rm = na.rm_gsaseq,
+                           verbose = verbose)
+          } else {
+            Sigma = NULL
+          }
+          
           vc_test_asym(y = y_lcpm[gs, , drop = FALSE], x = x,
                        indiv = sample_group, phi = phi,
                        w = w[gs, , drop = FALSE],
+                       Sigma = Sigma,
                        Sigma_xi = cov_variables2test_eff,
                        genewise_pvals = FALSE,
                        homogen_traj = homogen_traj,
@@ -708,7 +735,7 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                       n_perm = n_perm, genesets = genesets, pvals = pvals,
                       precision_weights = lapply(genesets,
                                                  FUN = function(gs){tryCatch(w[gs, , drop = FALSE],
-                                                                             error=function(cond){return(NA)})
+                                                                  error=function(cond){return(NA)})
                                                  }
                       ),
                       weight_object = w_full

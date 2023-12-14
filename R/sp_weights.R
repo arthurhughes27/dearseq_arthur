@@ -3,10 +3,10 @@
 #'Computes precision weights that account for heteroscedasticity in RNA-seq
 #'count data based on non-parametric local linear regression estimates.
 #'
-#'@param y a numeric matrix of size \code{g x n} containing the raw RNA-seq
-#'counts or preprocessed expression from \code{n} samples for \code{g} genes.
+#'@param y a numeric matrix of size \code{p x n} containing the raw RNA-seq
+#'counts or preprocessed expression from \code{n} samples for \code{p} genes.
 #'
-#'@param x a numeric matrix of size \code{n x p} containing the model
+#'@param x a numeric matrix of size \code{n x q} containing the model
 #'covariate(s) from \code{n} samples (design matrix).
 #'
 #'@param phi a numeric design matrix of size \code{n x K} containing the K
@@ -50,7 +50,7 @@
 #'\code{NaN}) be omitted from the calculations? Default is \code{FALSE}.
 #'
 #'@return a list containing the following components:\itemize{
-#'\item \code{weights}: a matrix \code{n x g} containing the computed precision 
+#'\item \code{weights}: a matrix \code{n x p} containing the computed precision 
 #'weights 
 #'\item \code{plot_utilities}: a list containing the following elements:\itemize{
 #'      \item\code{reverse_trans}: a function encoding the reverse function used 
@@ -72,10 +72,10 @@
 #'@examples
 #'set.seed(123)
 #'
-#'g <- 10000
+#'p <- 10000
 #'n <- 12
 #'p <- 2
-#'y <- sapply(1:n, FUN = function(x){rnbinom(n = g, size = 0.07, mu = 200)})
+#'y <- sapply(1:n, FUN = function(x){rnbinom(n = p, size = 0.07, mu = 200)})
 #'
 #'x <- sapply(1:p, FUN = function(x){rnorm(n = n, mean = n, sd = 1)})
 #'
@@ -104,17 +104,17 @@ sp_weights <- function(y, x, phi = NULL, use_phi = TRUE, preprocessed = FALSE,
   stopifnot(is.matrix(x))
   stopifnot(is.null(phi) | is.matrix(phi))
   
-  g <- nrow(y)  # the number of genes measured
+  p <- nrow(y)  # the number of genes measured
   n <- ncol(y)  # the number of samples measured
-  qq <- ncol(x)  # the number of covariates
+  q <- ncol(x)  # the number of covariates
   stopifnot(nrow(x) == n)
   if(use_phi){
     stopifnot(nrow(phi) == n)
   }
   
-  # removing genes never observed:
+  # removing genes constantly expressed or never observed:
   observed <- which(rowSums(y, na.rm = TRUE) != 0)
-  nb_g_sum0 <- length(observed) - g
+  nb_g_sum0 <- length(observed) - p
   if (nb_g_sum0 > 0) {
     warning(nb_g_sum0, " y rows sum to 0 (i.e. are never observed)",
             "and have been removed")
