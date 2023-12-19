@@ -81,7 +81,7 @@ GS_cor <- function(y, x, phi = NULL, indiv, w = NULL, use_phi = TRUE, preprocess
   
   indiv <- as.factor(as.numeric(as.factor(indiv)))  #coercing sample index vector to factors
   n_indiv <- length(levels(indiv)) #number of individuals under study
-  n_i = (summary(indiv) %>% as.vector()) #number of observations per individual
+  n_i = (summary(indiv, maxsum = n_indiv) %>% as.vector()) #number of observations per individual
   t = max(n_i) # max number of observations 
 
   # removing genes never observed:

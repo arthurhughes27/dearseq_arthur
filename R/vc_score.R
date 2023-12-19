@@ -72,6 +72,7 @@
 #'scoreTest$score
 #'
 #'@importFrom stats model.matrix
+#'@importFrom reshape2 melt
 #'
 #'@export
 vc_score <- function(y, x, indiv = c(1:ncol(y)), phi, w = NULL, Sigma_xi = NULL,
@@ -106,7 +107,7 @@ vc_score <- function(y, x, indiv = c(1:ncol(y)), phi, w = NULL, Sigma_xi = NULL,
     
     indiv <- as.factor(as.numeric(as.factor(indiv))) # converting indiv vector to numeric factor
     n_indiv <- length(levels(indiv)) # number of individuals
-    n_i = (summary(indiv) %>% as.vector()) # number of observations per individual
+    n_i = (summary(indiv, maxsum = n_indiv) %>% as.vector()) # number of observations per individual
     
     stopifnot(nrow(x) == n) # covariate matrix must have samples as rows
     stopifnot(nrow(phi) == n) # test variable matrix must have samples as rows
@@ -153,6 +154,8 @@ vc_score <- function(y, x, indiv = c(1:ncol(y)), phi, w = NULL, Sigma_xi = NULL,
     alpha_OLS <- solve(crossprod(x)) %*% t(x) %*% y_T
     yt_mu <- y_T - x %*% alpha_OLS
     y_mu = t(yt_mu)
+    y_mu_long = melt(cbind(data.frame(yt_mu), individual = indiv), id.vars = "individual")
+    w_long = melt(cbind(data.frame(t(w)), individual = indiv), id.vars = "individual")
     
     sigma_inv = vector("list", n_indiv) # List to store the inverted covariance matrices
     Q_indiv = matrix(0,nrow = p*K, ncol = n_indiv) #matrix for individual level contributions
@@ -165,20 +168,30 @@ vc_score <- function(y, x, indiv = c(1:ncol(y)), phi, w = NULL, Sigma_xi = NULL,
         phi_diag = as.matrix(bdiag(rep(list(phi[indiv == i,]), p)))
       }
       
-      y_mui = rep(0,n_i[i]*p) # temporary column vector for centered gene expression
-      for (g in c(1:p)){
-        y_mui[c(((g-1)*n_i[i]+1):(g*n_i[i]))] = y_mu[g,c(indiv == i)] #rearranging samples 
-                                                                      # to long format
-      } 
+      y_mui2 = rep(0,n_i[i]*p) # temporary column vector for centered gene expression
+      
+      #rearranging to long format
+      y_mui = y_mu_long %>% filter(individual == i) %>% select(value) %>% as.matrix()
+      
+      # for (g in c(1:p)){
+      #   y_mui2[c(((g-1)*n_i[i]+1):(g*n_i[i]))] = y_mu[g,c(indiv == i)] # slow method
+      # 
+      # }
       
       if (cor_structure == TRUE){
-        sigma_inv[[i]] = solve(Sigma[[i]]) # inverse of full unstructured covariance matrix if given
+        # inverse of full unstructured covariance matrix if given
+        #sigma_inv[[i]] = solve(Sigma[[i]]) #slow with for loop
+        #sigma_inv = lapply(Sigma, solve) # solve + lapply still slow
+        # Cholesky decomposition much faster
+        sigma_inv = lapply(lapply(Sigma, chol), Matrix::chol2inv)   
       } else {
-        wcol = rep(0,n_i[i]*p) #temporary column vector to store obs-level weights
-        for (g in c(1:p)){
-          wcol[c(((g-1)*n_i[i]+1):(g*n_i[i]))] = w[g,indiv == i] # long format 
-        }
-        sigma_inv[[i]] = wcol %>% as.vector() %>% diag() 
+        # wcol2 = rep(0,n_i[i]*p) #temporary column vector to store obs-level weights
+        # for (g in c(1:p)){
+        #   wcol2[c(((g-1)*n_i[i]+1):(g*n_i[i]))] = w[g,indiv == i] # long format
+        # }
+        wcol = w_long %>% filter(individual == i) %>% select(value) %>% as.matrix()
+        
+        sigma_inv[[i]] = w_long %>% filter(individual == i) %>% select(value) %>% as.matrix() %>% as.vector() %>% diag() 
         # covariance matrix is simply weights if no correlation structure desired
         # (weights are already inverse variances)
       }

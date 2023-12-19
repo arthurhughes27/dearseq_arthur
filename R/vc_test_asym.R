@@ -135,7 +135,7 @@ vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w = NULL,
   
     indiv <- as.factor(as.numeric(as.factor(indiv))) # converting indiv vector to numeric factor
     n_indiv <- length(levels(indiv)) # number of individuals
-    n_i = (summary(indiv) %>% as.vector()) # number of observations per individual
+    n_i = (summary(indiv ,maxsum = n_indiv) %>% as.vector()) # number of observations per individual
   
     stopifnot(nrow(x) == n) # covariate matrix must have samples as rows
     stopifnot(nrow(phi) == n) # test variable matrix must have samples as rows
