@@ -14,9 +14,9 @@ Authors@R: c(person("Denis", "Agniel", role = c("aut"),
 	           person("Mélanie", "Huchon", role = c("ctb"),
 	                  email = "melanie.huchon@u-bordeaux.fr"),
 	           person("Iban", "Larrouture", role = c("ctb"),
-	                  email = "iban.larrouture@u-bordeaux.fr")
-		   person("Arthur', "Hughes", role = c("ctb"),
-			 email = "arthur.hughes@u-bordeaux.fr"))
+	                  email = "iban.larrouture@u-bordeaux.fr"),
+		         person("Arthur', "Hughes", role = c("ctb"),
+			              email = "arthur.hughes@u-bordeaux.fr"))
 Depends: R (>= 3.6.0)
 Imports: CompQuadForm, dplyr, ggplot2, KernSmooth, magrittr, matrixStats, methods, 
          patchwork, parallel, pbapply, reshape2, rlang, scattermore, stats, 
