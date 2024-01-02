@@ -73,7 +73,7 @@
 #'
 #'@importFrom stats model.matrix
 #'@importFrom reshape2 melt
-#'
+#'@importFrom Matrix bdiag
 #'@export
 vc_score <- function(y, x, indiv = c(1:ncol(y)), phi, w = NULL, Sigma_xi = NULL,
                      Sigma = NULL, na.rm = FALSE) {
