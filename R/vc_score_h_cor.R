@@ -46,7 +46,9 @@
 #'   \item \code{gene_scores}: approximation of the individual gene scores
 #' }
 #'
-#'
+#'@importFrom stats model.matrix
+#'@importFrom reshape2 melt
+#'@importFrom Matrix bdiag
 #'@export
 vc_score_h_cor <- function(y, x, indiv, phi, use_phi = T, Sigma, gene_based = F, Sigma_xi = diag(ncol(phi)),
                        na_rm = FALSE) {

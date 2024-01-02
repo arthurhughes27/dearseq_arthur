@@ -102,7 +102,9 @@
 #'                                    Sigma_xi=cov(tim),
 #'                                    homogen_traj = FALSE)
 #'scoreTest_heterogen$set_pval
-#'
+#'@importFrom stats model.matrix
+#'@importFrom reshape2 melt
+#'@importFrom Matrix bdiag
 #'@export
 vc_score_h <- function(y, x, indiv = c(1:ncol(y)), phi, w = NULL, Sigma_xi = diag(ncol(phi)),
                      Sigma = NULL, na.rm = FALSE) {
