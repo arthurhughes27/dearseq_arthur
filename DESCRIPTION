@@ -20,7 +20,7 @@ Authors@R: c(person("Denis", "Agniel", role = c("aut"),
 Depends: R (>= 3.6.0)
 Imports: CompQuadForm, dplyr, ggplot2, KernSmooth, magrittr, matrixStats, methods, 
          patchwork, parallel, pbapply, reshape2, rlang, scattermore, stats, 
-         statmod, survey, tibble, viridisLite
+         statmod, survey, tibble, viridisLite, Matrix, reshape2
 Suggests: Biobase, BiocManager, BiocSet, edgeR, DESeq2, GEOquery, GSA, knitr, 
           limma, readxl, rmarkdown, S4Vectors, SummarizedExperiment, testthat, covr
 Description: Differential Expression Analysis RNA-seq data with variance 
