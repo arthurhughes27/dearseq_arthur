@@ -41,188 +41,213 @@
 #'@return A list with the following elements:\itemize{
 #'   \item \code{score}: approximation of the set observed score
 #'   \item \code{q}: observation-level contributions to the score
-#'   \item \code{q_ext}: pseudo-observations used to compute the covariance,
+#'   \item \code{q_ext}: "pseudo-observations" used to compute the covariance of q,
 #'    taking into account the contributions of OLS estimates
 #'   \item \code{gene_scores_unscaled}: a vector of the approximations of the
 #'   individual gene scores
 #' }
-#'
 #'
 #'@examples
 #'set.seed(123)
 #'
 #'##generate some fake data
 #'########################
-#'ng <- 100
-#'nindiv <- 30
-#'nt <- 5
-#'nsample <- nindiv*nt
-#'tim <- matrix(rep(1:nt), nindiv, ncol=1, nrow=nsample)
-#'tim2 <- tim^2
-#'sigma <- 5
-#'b0 <- 10
+#'n <- 100
+#'r <- 12
+#'t <- matrix(rep(1:3), r/3, ncol=1, nrow=r)
+#'sigma <- 0.4
+#'b0 <- 1
 #'
 #'#under the null:
-#'beta1 <- rnorm(n=ng, 0, sd=0)
-#'#under the (heterogen) alternative:
-#'beta1 <- rnorm(n=ng, 0, sd=0.1)
-#'#under the (homogen) alternative:
-#'beta1 <- rnorm(n=ng, 0.06, sd=0)
-#'
-#'y.tilde <- b0 + rnorm(ng, sd = sigma)
-#'y <- t(matrix(rep(y.tilde, nsample), ncol=ng, nrow=nsample, byrow=TRUE) +
-#'       matrix(rep(beta1, each=nsample), ncol=ng, nrow=nsample, byrow=FALSE) *
-#'            matrix(rep(tim, ng), ncol=ng, nrow=nsample, byrow=FALSE) +
-#'       #matrix(rep(beta1, each=nsample), ncol=ng, nrow=nsample, byrow=FALSE) *
-#'       #    matrix(rep(tim2, ng), ncol=ng, nrow=nsample, byrow=FALSE) +
-#'       matrix(rnorm(ng*nsample, sd = sigma), ncol=ng, nrow=nsample,
-#'              byrow=FALSE)
-#'       )
-#'myindiv <- rep(1:nindiv, each=nt)
-#'x <- cbind(1, myindiv/2==floor(myindiv/2))
-#'myw <- matrix(rnorm(nsample*ng, sd=0.1), ncol=nsample, nrow=ng)
+#'b1 <- 0
+#'#under the alternative:
+#'b1 <- 0.7
+#'y.tilde <- b0 + b1*t + rnorm(r, sd = sigma)
+#'y <- t(matrix(rnorm(n*r, sd = sqrt(sigma*abs(y.tilde))), ncol=n, nrow=r) +
+#'       matrix(rep(y.tilde, n), ncol=n, nrow=r))
+#'x <- matrix(1, ncol=1, nrow=r)
 #'
 #'#run test
-#'score_homogen <- vc_score_h(y, x, phi=tim, indiv=myindiv,
-#'                            w=myw, Sigma_xi=cov(tim))
-#'score_homogen$score
+#'scoreTest <- vc_score(y, x, phi=t, w=matrix(1, ncol=ncol(y), nrow=nrow(y)),
+#'                     Sigma_xi=matrix(1), indiv=rep(1:(r/3), each=3))
+#'scoreTest$score
 #'
-#'score_heterogen <- vc_score(y, x, phi=tim, indiv=myindiv,
-#'                            w=myw, Sigma_xi=cov(tim))
-#'score_heterogen$score
-#'
-#'scoreTest_homogen <- vc_test_asym(y, x, phi=tim, indiv=rep(1:nindiv, each=nt),
-#'                                  w=matrix(1, ncol=ncol(y), nrow=nrow(y)),
-#'                                  Sigma_xi=cov(tim),
-#'                                  homogen_traj = TRUE)
-#'scoreTest_homogen$set_pval
-#'scoreTest_heterogen <- vc_test_asym(y, x, phi=tim, indiv=rep(1:nindiv,
-#'                                                          each=nt),
-#'                                    w=matrix(1, ncol=ncol(y), nrow=nrow(y)),
-#'                                    Sigma_xi=cov(tim),
-#'                                    homogen_traj = FALSE)
-#'scoreTest_heterogen$set_pval
 #'@importFrom stats model.matrix
 #'@importFrom reshape2 melt
 #'@importFrom Matrix bdiag
 #'@export
-vc_score_h <- function(y, x, indiv = c(1:ncol(y)), phi, w = NULL, Sigma_xi = diag(ncol(phi)),
+vc_score <- function(y, x, indiv = c(1:ncol(y)), phi, w = NULL, Sigma_xi = NULL,
                      Sigma = NULL, na.rm = FALSE) {
-
-    ## dimensions, formatting and validity checks---
   
-    if (!is.null(Sigma)){
-     cor_structure = TRUE # set argument if Sigma provided
-    } else {
-     cor_structure = FALSE
-    }
+  ## dimensions, formatting and validity checks---
   
-    if (cor_structure == TRUE & (sum(!is.finite(unlist(Sigma)))) > 0) {
-     stop("At least 1 non-finite covariance entry in Sigma") # check finite covariance entries
-    }
+  if (!is.null(Sigma)){
+    cor_structure = TRUE # set argument as TRUE if Sigma provided
+  } else {
+    cor_structure = FALSE
+  }
   
-    if(cor_structure == TRUE & any(unlist(lapply(Sigma, 
-                                                 FUN = function(x){any(svd(x)$d < 1e-10)})))){
-     cor_structure = FALSE #If any Sigma matrices are singular, do not use them
-    }
+  # Check finiteness of covariance matrix entries
+  if (cor_structure == TRUE & (sum(!is.finite(unlist(Sigma)))) > 0) {
+    stop("At least 1 non-finite covariance entry in Sigma")
+  }
+  # Check non-singularity of covariance matrices
+  if(cor_structure == TRUE & any(unlist(lapply(Sigma, 
+                                               FUN = function(x){any(svd(x)$d < 1e-10)})))){
+    cor_structure = FALSE #If any Sigma matrices are singular, we do not use them
+  }
   
+  # Check data is provided in matrix format
+  stopifnot(is.matrix(y)) 
+  stopifnot(is.matrix(x))
+  stopifnot(is.matrix(phi))
   
-    stopifnot(is.matrix(y)) # check data is provided in matrix format
-    stopifnot(is.matrix(x))
-    stopifnot(is.matrix(phi))
+  # Set arguments based on input dimensions
+  p <- nrow(y)  # the number of genes in the set
+  n <- ncol(y)  # the number of samples measured
+  q <- ncol(x)  # the number of covariates
+  K <- ncol(phi) # the number of test variables
   
-    p <- nrow(y)  # the number of genes in the set
-    n <- ncol(y)  # the number of samples measured
-    q <- ncol(x)  # the number of covariates
-    K <- ncol(phi) # the number of test variables
+  # converting indiv vector to numeric factor
+  indiv <- as.factor(as.numeric(as.factor(indiv))) 
+  n_indiv <- length(levels(indiv)) # number of individuals
+  n_i = (summary(indiv, maxsum = n_indiv) %>% as.vector()) # number of observations per individual
   
-    indiv <- as.factor(as.numeric(as.factor(indiv))) # converting indiv vector to numeric factor
-    n_indiv <- length(levels(indiv)) # number of individuals
-    n_i = (summary(indiv) %>% as.vector()) # number of observations per individual
+  # Check concordance of input matrices
+  stopifnot(nrow(x) == n) # covariate matrix must have samples as rows
+  stopifnot(nrow(phi) == n) # test variable matrix must have samples as rows
+  stopifnot(length(indiv) == n) # vector of sample indices must have n elements
   
-    stopifnot(nrow(x) == n) # covariate matrix must have samples as rows
-    stopifnot(nrow(phi) == n) # test variable matrix must have samples as rows
-    stopifnot(length(indiv) == n) # vector of sample indices must have n elements
-  
-    if (is.null(w)){
-      w = matrix(1, nrow = p, ncol = n) # if no weights specified, heteroskedasticity not accounted for
-    } else {
-     stopifnot(nrow(w) == p | ncol(w) == n) # else weights must have column samples and row genes
-    } 
+  # Check heteroskedasticity weights
+  if (is.null(w)){
+    w = matrix(1, nrow = p, ncol = n) # if no weights specified, heteroskedasticity not accounted for
+  } else {
+    stopifnot(nrow(w) == p | ncol(w) == n) # else weights must have column samples and row genes
+  }
   
   # Check finiteness of weights
-    if (sum(!is.finite(w)) > 0) {
-      stop("At least 1 non-finite weight in 'w'") 
+  if (sum(!is.finite(w)) > 0) {
+    stop("At least 1 non-finite weight in 'w'") 
+  }
+  
+  # check correct number and dimensions of covariance matrices
+  if (cor_structure == TRUE){
+    stopifnot(length(Sigma) == n_indiv) 
+    stopifnot(all(unlist(lapply(lapply(Sigma, dim), `[[`, 1)) == n_i*p))
+  }
+  
+  # Check random effects covariance matrix
+  if (is.null(Sigma_xi)){
+    Sigma_xi = diag(ncol(phi)) # If not provided, set as identity
+  }
+  stopifnot(ncol(Sigma_xi) == K) # Check correct dimensions
+  
+  ## OLS for conditional mean -----
+  if (na.rm & sum(is.na(y)) > 0) {
+    y_0 <- y
+    y_0[is.na(y_0)] <- 0 } else { # removing NAs if argument selected
+      y_0 <- y
     }
   
-    if (cor_structure == TRUE){
-      stopifnot(length(Sigma) == n_indiv) # check correct number of covariance matrices
-     stopifnot(all(unlist(lapply(lapply(Sigma, dim), `[[`, 1)) == n_i*p))
-     # check correct dimensions of all covariance matrices
-    }
+  y_T = t(y_0) # Transpose of expression matrix
+  # OLS estimate of mean effect, assuming homogeneous effect of covariates across genes
+  alpha <- solve(crossprod(x)) %*% t(x) %*% rowMeans(y_T, na.rm = na.rm)
+  # Centered gene expression given OLS estimate
+  yt_mu <- y_T - do.call(cbind, replicate(p, x %*% alpha, simplify = FALSE))
+  y_mu = t(yt_mu) # Transpose of centered gene expression
   
-    # the number of random effects
-    if (is.null(Sigma_xi)){
-     Sigma_xi = diag(ncol(phi))
+  if (cor_structure == TRUE){ # Case for when correlation structures are estimated
+    
+    # List of phi matrices in block diagonal format
+    # First create list of values split by individual index, then apply bdiag function with lapply
+    phi_diag_list = lapply(split(phi, indiv), FUN = function(input_list){
+      as.matrix(bdiag(rep(list(input_list), p)))
+    })
+    
+    # Transforming to long format - i.e. each column an individual with "stacked" observations
+    y_mu_long = melt(cbind(data.frame(yt_mu), individual = indiv), id.vars = "individual")
+    
+    # Creating a list with ith element as the (long format) centered expression for individual i
+    y_mu_long_list = split(y_mu_long$value, y_mu_long$individual)
+    
+    # Inverting covariance matrices using Cholesky decomposition (faster than solve())
+    sigma_inv_list = lapply(lapply(Sigma, chol), Matrix::chol2inv)
+    
+    # mapply to perform the required matrix multiplication (faster than for loop)
+    Q_indiv = mapply(FUN = function(A,B,C){return(crossprod(A,B) %*% C)}, 
+                     y_mu_long_list, sigma_inv_list, phi_diag_list)
+    
+    # Final outputs 
+    q = t(Q_indiv) # Individual level test statistic contributions 
+    qq <- colSums(q, na.rm = na.rm)^2/n_indiv  # Genewise, variable specific scores
+    gene_Q <- rowSums(matrix(qq, ncol = K))  # Gene scores
+    Q <- sum(qq) # set score
+    
+    ## Calculating "pseudo-observations" for estimating the covariance of q
+    sig_xi_sqrt <- (Sigma_xi * diag(K)) ^ (-0.5)
+    sig_eps_inv_T <- t(w)
+    
+    phi_sig_xi_sqrt <- phi %*% sig_xi_sqrt # =phi
+    
+    T_fast <- do.call(cbind, replicate(K, sig_eps_inv_T, simplify = FALSE)) *
+      matrix(apply(phi_sig_xi_sqrt, 2, rep, p), ncol = p * K)
+    
+    XT_fast <- crossprod(x, T_fast)/n_indiv  # Covariate contributions?
+    avg_xtx_inv_tx <- n_indiv * tcrossprod(solve(crossprod(x, x)), x)
+    U_XT <- matrix(yt_mu, ncol = p * K, nrow = n) *
+      crossprod(avg_xtx_inv_tx, XT_fast)
+    if (na.rm & sum(is.na(U_XT)) > 0) {
+      U_XT[is.na(U_XT)] <- 0
     }
-    if (length(Sigma_xi) == 1) {
-     K <- 1
-     Sigma_xi <- matrix(Sigma_xi, K, K)
+    
+    if (length(levels(indiv)) > 1) {
+      indiv_mat <- stats::model.matrix(~0 + factor(indiv))
     } else {
-     K <- nrow(Sigma_xi)
-     stopifnot(ncol(Sigma_xi) == K)
-    }
-    stopifnot(K == K)
-  
-    ## OLS for conditional mean -----
-    if (na.rm & sum(is.na(y)) > 0) {
-     y_0 <- y
-      y_0[is.na(y_0)] <- 0 } else { # removing NAs if argument selected
-        y_0 <- y
-      }
-    
-    y_T = t(y_0)
-    alpha <- solve(crossprod(x)) %*% t(x) %*% rowMeans(y_T, na.rm = na.rm)
-    yt_mu <- y_T - do.call(cbind, replicate(p, x %*% alpha, simplify = FALSE))
-    y_mu = t(yt_mu)
-
-    ## test statistic computation ------
-    sig_xi_sqrt <- (Sigma_xi * diag(K))^(-0.5)
-    
-    sigma_inv = vector("list", n_indiv) # List to store the inverted covariance matrices
-    Q_indiv = matrix(0,nrow = p*K, ncol = n_indiv) #matrix for individual level contributions
-    for (i in c(1:n_indiv)){ 
-      # Test variable matrix in block diag form
-      if (n_i[i] == 1){
-        phi_diag = t(as.matrix(bdiag(rep(list(phi[indiv == i,]), p))))
-      } else {
-        phi_diag = as.matrix(bdiag(rep(list(phi[indiv == i,]), p)))
-      }
-      
-      y_mui = rep(0,n_i[i]*p) # temporary column vector for centered gene expression
-      for (g in c(1:p)){
-        y_mui[c(((g-1)*n_i[i]+1):(g*n_i[i]))] = y_mu[g,c(indiv == i)] #rearranging samples 
-                                                                      # to long format
-      } 
-      
-      if (cor_structure == TRUE){
-        sigma_inv[[i]] = solve(Sigma[[i]]) # inverse of full unstructured covariance matrix if given
-      } else {
-        wcol = rep(0,n_i[i]*p) #temporary column vector to store obs-level weights
-        for (g in c(1:p)){
-          wcol[c(((g-1)*n_i[i]+1):(g*n_i[i]))] = w[g,indiv == i] # long format 
-        }
-        sigma_inv[[i]] = wcol %>% as.vector() %>% diag() 
-        # covariance matrix is simply weights if no correlation structure desired
-        # (weights are already inverse variances)
-      }
-      
-      Q_indiv[,i] = crossprod((y_mui),sigma_inv[[i]]) %*% phi_diag 
+      indiv_mat <- matrix(as.numeric(indiv), ncol = 1)
     }
     
-    q_col = n_indiv^{-1/2}*rowSums(Q_indiv)
-    Q = crossprod(q_col)
-    gene_Q_unscaled = rowSums(Q_indiv) # pay attention to case with >1 testing variable 
+    U_XT_indiv <- crossprod(indiv_mat, U_XT)
+    q_ext <- q - U_XT_indiv #pseudo_observations
     
-    return(list(score = Q, Q_indiv = Q_indiv, gene_scores_unscaled = gene_Q_unscaled))
+    return(list(score = Q, q = q, q_ext = q_ext, gene_scores_unscaled = gene_Q))
+    
+  } else { # Case for when correlation structures are NOT estimated
+    sig_xi_sqrt <- (Sigma_xi * diag(K)) %^% (-0.5)
+    sig_eps_inv_T <- t(w)
+    phi_sig_xi_sqrt <- phi %*% sig_xi_sqrt
+    
+    T_fast <- do.call(cbind, replicate(K, sig_eps_inv_T, simplify = FALSE)) *
+      matrix(apply(phi_sig_xi_sqrt, 2, rep, p), ncol = p * K)
+    ##---------------------
+    ## the structure of T_fast is time_basis_1*gene_1, time_basis_1*gene_2, ...,
+    ## time_basis_1*gene_p, ..., time_basis_K*gene_1, ..., time_basis_K*gene_p
+    ##----------------------------
+    q_fast <- matrix(yt_mu, ncol = p * K, nrow = n) * T_fast
+    if (length(levels(indiv)) > 1) {
+      indiv_mat <- stats::model.matrix(~0 + factor(indiv))
+    } else {
+      indiv_mat <- matrix(as.numeric(indiv), ncol = 1)
+    }
+    
+    if (na.rm & sum(is.na(q_fast)) > 0) {
+      q_fast[is.na(q_fast)] <- 0
+    }
+    q <- crossprod(indiv_mat, q_fast)
+    XT_fast <- crossprod(x, T_fast)/n_indiv
+    avg_xtx_inv_tx <- n_indiv * tcrossprod(solve(crossprod(x, x)), x)
+    U_XT <- matrix(yt_mu, ncol = p * K, nrow = n) *
+      crossprod(avg_xtx_inv_tx, XT_fast)
+    if (na.rm & sum(is.na(U_XT)) > 0) {
+      U_XT[is.na(U_XT)] <- 0
+    }
+    
+    U_XT_indiv <- crossprod(indiv_mat, U_XT)
+    q_ext <- q - U_XT_indiv
+    qq <- colSums(q, na.rm = na.rm)^2/n_indiv  # genewise, variable specific scores
+    gene_Q <- rowSums(matrix(qq, ncol = K))  # gene scores
+    
+    Q <- sum(qq) # set score
+    
+    return(list(score = Q, q = q, q_ext = q_ext, gene_scores_unscaled = gene_Q))
+  } 
 }
