@@ -153,33 +153,28 @@ vc_score <- function(y, x, indiv = c(1:ncol(y)), phi, w = NULL, Sigma_xi = NULL,
     yt_mu <- y_T - x %*% alpha_OLS # Centered gene expression given OLS estimate
     y_mu = t(yt_mu) # Transpose of centered gene expression
     
-    if (cor_structure == TRUE){ # Case for when correlation structures are estimateda
+    if (cor_structure == TRUE){ # Case for when correlation structures are estimated
+      
+      # List of phi matrices in block diagonal format
+      # First create list of values split by individual index, then apply bdiag function with lapply
+      phi_diag_list = lapply(split(phi, indiv), FUN = function(input_list){
+        as.matrix(bdiag(rep(list(input_list), p)))
+      })
       
       # Transforming to long format - i.e. each column an individual with "stacked" observations
       y_mu_long = melt(cbind(data.frame(yt_mu), individual = indiv), id.vars = "individual")
       
-      #w_long = melt(cbind(data.frame(t(w)), individual = indiv), id.vars = "individual")
+      # Creating a list with ith element as the (long format) centered expression for individual i
+      y_mu_long_list = split(y_mu_long$value, y_mu_long$individual)
       
-      sigma_inv = vector("list", n_indiv) # List to store the inverted covariance matrices
-      Q_indiv = matrix(0,nrow = p*K, ncol = n_indiv) # matrix for individual level contributions
-      #T_fast = matrix(0,nrow = p*K, ncol = n_indiv) 
+      # Inverting covariance matrices using Cholesky decomposition (faster than solve())
+      sigma_inv_list = lapply(lapply(Sigma, chol), Matrix::chol2inv)
       
-      for (i in c(1:n_indiv)){ 
-       # Putting test variable matrix in block diag form for ith individual
-        if (n_i[i] == 1){ # strange behaviour when only have one observation for an individual
-          phi_diag = t(as.matrix(bdiag(rep(list(phi[indiv == i,]), p))))
-        } else {
-          phi_diag = as.matrix(bdiag(rep(list(phi[indiv == i,]), p)))
-        }
+      # mapply to perform the required matrix multiplication (faster than for loop)
+      Q_indiv = mapply(FUN = function(A,B,C){return(crossprod(A,B) %*% C)}, 
+                         y_mu_long_list, sigma_inv_list, phi_diag_list)
       
-      # Long format vector for centered expression of individual i
-        y_mui = y_mu_long %>% filter(individual == i) %>% select(value) %>% as.matrix()
-     
-      # Inverting covariance matrix - Cholesky decomposition faster than solve()
-        sigma_inv = lapply(lapply(Sigma, chol), Matrix::chol2inv)
-      # Individual level test statistic contributions
-        Q_indiv[,i] = crossprod((y_mui),sigma_inv[[i]]) %*% phi_diag
-        }
+      # Final outputs 
       q = t(Q_indiv) # Individual level test statistic contributions 
       qq <- colSums(q, na.rm = na.rm)^2/n_indiv  # Genewise, variable specific scores
       gene_Q <- rowSums(matrix(qq, ncol = K))  # Gene scores
