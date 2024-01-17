@@ -178,6 +178,7 @@
 #'   the raw p-values, the second one contains the FDR adjusted p-values
 #'   (according to the '\code{padjust_methods}' argument) and is named
 #'   '\code{adjPval}'.
+#'   \item \code{score}: The gene-set variance-component score test statistics.
 #' }
 #'
 #'@seealso \code{\link{sp_weights}} \code{\link{vc_test_perm}}
@@ -520,12 +521,16 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
       if (is.null(sample_group)) {
         sample_group <- seq_len(nrow(x))
       }
-      rawPvals <- vc_test_asym(y = y_lcpm, x = x, indiv = sample_group,
-                               phi = phi, w = w,
-                               Sigma_xi = cov_variables2test_eff,
-                               genewise_pvals = TRUE,
-                               homogen_traj = homogen_traj,
-                               na.rm = na.rm_gsaseq)$gene_pvals
+      vc_test <- vc_test_asym(y = y_lcpm, x = x, indiv = sample_group,
+                             phi = phi, w = w,
+                             Sigma_xi = cov_variables2test_eff,
+                             genewise_pvals = TRUE,
+                             homogen_traj = homogen_traj,
+                             na.rm = na.rm_gsaseq)
+      rawPvals <- vc_test$gene_pvals 
+      
+      score <- vc_test$set_score_obs
+      
     } else if (which_test == "permutation") {
       if (is.null(sample_group)) {
         sample_group <- rep(1, nrow(x))
@@ -555,6 +560,7 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                                   homogen_traj = homogen_traj,
                                   na.rm = na.rm_gsaseq)
       rawPvals <- perm_result$gene_pvals
+      score <- perm_result$set_score_obs
     }
 
     pvals <- data.frame(rawPval = rawPvals,
@@ -666,6 +672,44 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
           )$set_pval
         }
       }, FUN.VALUE = 0.5)
+      
+      score <- vapply(seq_along(genesets), FUN = function(i_gs) {
+        gs <- genesets[[i_gs]]
+        e <- tryCatch(y_lcpm[gs, 1, drop = FALSE],
+                      error=function(cond){return(NULL)})
+        if (length(e) < 1) {
+          warning("Gene set ", i_gs, " contains 0 measured ",
+                  "transcripts: associated p-value cannot ",
+                  "be computed")
+          NA
+        } else {
+          
+          if (cor_structure == TRUE){
+            Sigma = GS_cor(y = y_lcpm[gs, , drop = FALSE], 
+                           x = x, 
+                           phi = phi, 
+                           indiv = sample_group, 
+                           w = w[gs, , drop = FALSE], 
+                           preprocessed = preprocessed, 
+                           use_phi = weights_var2test_condi, 
+                           na.rm = na.rm_gsaseq,
+                           verbose = verbose)
+          } else {
+            Sigma = NULL
+          }
+          
+          vc_test_asym(y = y_lcpm[gs, , drop = FALSE], x = x,
+                       indiv = sample_group, phi = phi,
+                       w = w[gs, , drop = FALSE],
+                       Sigma = Sigma,
+                       Sigma_xi = cov_variables2test_eff,
+                       genewise_pvals = FALSE,
+                       homogen_traj = homogen_traj,
+                       na.rm = na.rm_gsaseq
+          )$set_score_obs
+        }
+      }, FUN.VALUE = 0.5)
+      
     } else if (which_test == "permutation") {
       if (is.null(sample_group)) {
         sample_group <- rep(1, nrow(x))
@@ -728,7 +772,7 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
   if(is.null(genesets)){
     ans_final <- list(which_test = which_test, preprocessed = preprocessed,
                       n_perm = n_perm, pvals = pvals, precision_weights = w,
-                      weight_object = w_full
+                      weight_object = w_full, score = score
     )
   }else{
     ans_final <- list(which_test = which_test, preprocessed = preprocessed,
@@ -738,7 +782,7 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                                                                   error=function(cond){return(NA)})
                                                  }
                       ),
-                      weight_object = w_full
+                      weight_object = w_full, score = score
     )
   }
 

@@ -141,7 +141,7 @@ GS_cor <- function(y, x, phi = NULL, indiv, w = NULL, use_phi = TRUE, preprocess
       # by a single element of the genewise matrix
     }
   }
-  
+
   #Plug in estimator of covariance matrix incorporating weights
   sigma_list = vector("list", n_indiv) #store individual covariance matrices
   for (i in c(1:n_indiv)){ #for all individuals
