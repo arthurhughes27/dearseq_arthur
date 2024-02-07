@@ -158,6 +158,13 @@
 #'@param verbose logical: should informative messages be printed during the
 #'computation? Default is \code{TRUE}.
 #'
+#'@param return_score logical: should the variance-component score test statistics be returned? Default
+#'is \code{FALSE}.
+#'
+#'#'@param GLS logical: should an iterative generalised least squares algorithm be used for estimating
+#'the mean effect of the covariates? Default is \code{FALSE}, in which case ordinary 
+#'least squares is used.
+#'
 #'@return A list with the following elements:\itemize{
 #'   \item \code{which_test}: a character string carrying forward the value of
 #'   the '\code{which_test}' argument indicating which test was perform (either
@@ -178,7 +185,10 @@
 #'   the raw p-values, the second one contains the FDR adjusted p-values
 #'   (according to the '\code{padjust_methods}' argument) and is named
 #'   '\code{adjPval}'.
-#'   \item \code{score}: The gene-set variance-component score test statistics.
+#'   \item \code{score}: If the \code{return_score} argument is true, returns 
+#'   A list of the gene-set variance-component score test statistics,
+#'   at the gene and set levels. Set scores returned in a vector with each entry
+#'   corresponding to a set. Gene and observation scores returned in lists.
 #' }
 #'
 #'@seealso \code{\link{sp_weights}} \code{\link{vc_test_perm}}
@@ -281,7 +291,9 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                      adaptive = TRUE, max_adaptive = 64000,
                      homogen_traj = FALSE,
                      na.rm_gsaseq = TRUE,
-                     verbose = TRUE) {
+                     verbose = TRUE, 
+                     return_score = FALSE, 
+                     GLS = FALSE) {
 
   if(weights_var2test_condi & which_test == "permutation"){
       warning("`weights_var2test_condi` must be FALSE for the ",
@@ -526,10 +538,11 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                              Sigma_xi = cov_variables2test_eff,
                              genewise_pvals = TRUE,
                              homogen_traj = homogen_traj,
-                             na.rm = na.rm_gsaseq)
+                             na.rm = na.rm_gsaseq,
+                             GLS = GLS)
       rawPvals <- vc_test$gene_pvals 
-      
-      score <- vc_test$set_score_obs
+      score_gene <- vc_test$gene_scores_obs
+      score_obs <- vc_test$observation_scores
       
     } else if (which_test == "permutation") {
       if (is.null(sample_group)) {
@@ -560,7 +573,8 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                                   homogen_traj = homogen_traj,
                                   na.rm = na.rm_gsaseq)
       rawPvals <- perm_result$gene_pvals
-      score <- perm_result$set_score_obs
+      score_set <- perm_result$set_score_obs
+      score_gene <- perm_result$gene_scores_obs
     }
 
     pvals <- data.frame(rawPval = rawPvals,
@@ -661,19 +675,20 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
             Sigma = NULL
           }
           
-          vc_test_asym(y = y_lcpm[gs, , drop = FALSE], x = x,
+        vc_test_asym(y = y_lcpm[gs, , drop = FALSE], x = x,
                        indiv = sample_group, phi = phi,
                        w = w[gs, , drop = FALSE],
                        Sigma = Sigma,
                        Sigma_xi = cov_variables2test_eff,
-                       genewise_pvals = FALSE,
+                       genewise_pvals = F,
                        homogen_traj = homogen_traj,
-                       na.rm = na.rm_gsaseq
+                       na.rm = na.rm_gsaseq, GLS = GLS
           )$set_pval
         }
       }, FUN.VALUE = 0.5)
       
-      score <- vapply(seq_along(genesets), FUN = function(i_gs) {
+      if (return_score == T){
+      score_set <- vapply(seq_along(genesets), FUN = function(i_gs) {
         gs <- genesets[[i_gs]]
         e <- tryCatch(y_lcpm[gs, 1, drop = FALSE],
                       error=function(cond){return(NULL)})
@@ -703,12 +718,89 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                        w = w[gs, , drop = FALSE],
                        Sigma = Sigma,
                        Sigma_xi = cov_variables2test_eff,
-                       genewise_pvals = FALSE,
+                       genewise_pvals = F,
                        homogen_traj = homogen_traj,
-                       na.rm = na.rm_gsaseq
+                       na.rm = na.rm_gsaseq, GLS = GLS
           )$set_score_obs
         }
       }, FUN.VALUE = 0.5)
+      
+      score_gene <- lapply(seq_along(genesets), FUN = function(i_gs) {
+        gs <- genesets[[i_gs]]
+        e <- tryCatch(y_lcpm[gs, 1, drop = FALSE],
+                      error=function(cond){return(NULL)})
+        if (length(e) < 1) {
+          warning("Gene set ", i_gs, " contains 0 measured ",
+                  "transcripts: associated p-value cannot ",
+                  "be computed")
+          NA
+        } else {
+          
+          if (cor_structure == TRUE){
+            Sigma = GS_cor(y = y_lcpm[gs, , drop = FALSE], 
+                           x = x, 
+                           phi = phi, 
+                           indiv = sample_group, 
+                           w = w[gs, , drop = FALSE], 
+                           preprocessed = preprocessed, 
+                           use_phi = weights_var2test_condi, 
+                           na.rm = na.rm_gsaseq,
+                           verbose = verbose)
+          } else {
+            Sigma = NULL
+          }
+          
+          vc_test_asym(y = y_lcpm[gs, , drop = FALSE], x = x,
+                       indiv = sample_group, phi = phi,
+                       w = w[gs, , drop = FALSE],
+                       Sigma = Sigma,
+                       Sigma_xi = cov_variables2test_eff,
+                       genewise_pvals = T,
+                       homogen_traj = homogen_traj,
+                       na.rm = na.rm_gsaseq, GLS = GLS
+          )$gene_scores_obs
+        }
+      })
+      
+      score_observation <- lapply(seq_along(genesets), FUN = function(i_gs) {
+        gs <- genesets[[i_gs]]
+        e <- tryCatch(y_lcpm[gs, 1, drop = FALSE],
+                      error=function(cond){return(NULL)})
+        if (length(e) < 1) {
+          warning("Gene set ", i_gs, " contains 0 measured ",
+                  "transcripts: associated p-value cannot ",
+                  "be computed")
+          NA
+        } else {
+          
+          if (cor_structure == TRUE){
+            Sigma = GS_cor(y = y_lcpm[gs, , drop = FALSE], 
+                           x = x, 
+                           phi = phi, 
+                           indiv = sample_group, 
+                           w = w[gs, , drop = FALSE], 
+                           preprocessed = preprocessed, 
+                           use_phi = weights_var2test_condi, 
+                           na.rm = na.rm_gsaseq,
+                           verbose = verbose)
+          } else {
+            Sigma = NULL
+          }
+          
+          vc_test_asym(y = y_lcpm[gs, , drop = FALSE], x = x,
+                       indiv = sample_group, phi = phi,
+                       w = w[gs, , drop = FALSE],
+                       Sigma = Sigma,
+                       Sigma_xi = cov_variables2test_eff,
+                       genewise_pvals = T,
+                       homogen_traj = homogen_traj,
+                       na.rm = na.rm_gsaseq, GLS = GLS
+          )$observation_scores
+        }
+      })
+      
+      }
+
       
     } else if (which_test == "permutation") {
       if (is.null(sample_group)) {
@@ -746,7 +838,7 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                        progressbar = progressbar,
                        parallel_comp = parallel_comp,
                        nb_cores = nb_cores,
-                       genewise_pvals = FALSE,
+                       genewise_pvals = F,
                        adaptive = adaptive,
                        max_adaptive = max_adaptive,
                        homogen_traj = homogen_traj,
@@ -754,8 +846,75 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
           )$set_pval
         }
       }, FUN.VALUE = 0.5)
+      
+      if (return_score == TRUE){
+        score_set <- vapply(seq_along(genesets), FUN = function(i_gs) {
+          gs <- genesets[[i_gs]]
+          e <- tryCatch(y_lcpm[gs, 1, drop = FALSE],
+                        error=function(cond){return(NULL)})
+          if (length(e) < 1) {
+            warning("Gene set ", i_gs, " contains 0 measured ",
+                    "transcript: associated p-value cannot be computed")
+            NA
+          } else {
+            if(verbose){
+              message("Analyzing gene set ", i_gs)
+            }
+            vc_test_perm(y = y_lcpm[gs, , drop = FALSE], x = x,
+                         indiv = sample_group,
+                         phi = phi, w = w[gs, , drop = FALSE],
+                         Sigma_xi = cov_variables2test_eff,
+                         n_perm = n_perm,
+                         progressbar = progressbar,
+                         parallel_comp = parallel_comp,
+                         nb_cores = nb_cores,
+                         genewise_pvals = F,
+                         adaptive = adaptive,
+                         max_adaptive = max_adaptive,
+                         homogen_traj = homogen_traj,
+                         na.rm = na.rm_gsaseq
+            )$set_score_obs
+          }
+        }, FUN.VALUE = 0.5)
+        
+        score_gene <- lapply(seq_along(genesets), FUN = function(i_gs) {
+          gs <- genesets[[i_gs]]
+          e <- tryCatch(y_lcpm[gs, 1, drop = FALSE],
+                        error=function(cond){return(NULL)})
+          if (length(e) < 1) {
+            warning("Gene set ", i_gs, " contains 0 measured ",
+                    "transcript: associated p-value cannot be computed")
+            NA
+          } else {
+            if(verbose){
+              message("Analyzing gene set ", i_gs)
+            }
+            vc_test_perm(y = y_lcpm[gs, , drop = FALSE], x = x,
+                         indiv = sample_group,
+                         phi = phi, w = w[gs, , drop = FALSE],
+                         Sigma_xi = cov_variables2test_eff,
+                         n_perm = n_perm,
+                         progressbar = progressbar,
+                         parallel_comp = parallel_comp,
+                         nb_cores = nb_cores,
+                         genewise_pvals = T,
+                         adaptive = adaptive,
+                         max_adaptive = max_adaptive,
+                         homogen_traj = homogen_traj,
+                         na.rm = na.rm_gsaseq
+            )$gene_scores_obs
+          }
+        }, FUN.VALUE = 0.5)
+        
+        
+      }
     }
-
+    
+    if (return_score == TRUE){
+      score = list(set_scores = score_set, gene_scores = score_gene, 
+                   observation_scores = score_observation)
+    }
+    
     if(!is.na(padjust_methods)){
       pvals <- data.frame(rawPval = rawPvals,
                           adjPval = stats::p.adjust(rawPvals,
@@ -769,6 +928,8 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
     }
 
   }
+  
+  if (return_score == TRUE){
   if(is.null(genesets)){
     ans_final <- list(which_test = which_test, preprocessed = preprocessed,
                       n_perm = n_perm, pvals = pvals, precision_weights = w,
@@ -784,6 +945,23 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                       ),
                       weight_object = w_full, score = score
     )
+  }} else {
+    if(is.null(genesets)){
+      ans_final <- list(which_test = which_test, preprocessed = preprocessed,
+                        n_perm = n_perm, pvals = pvals, precision_weights = w,
+                        weight_object = w_full
+      )
+    }else{
+      ans_final <- list(which_test = which_test, preprocessed = preprocessed,
+                        n_perm = n_perm, genesets = genesets, pvals = pvals,
+                        precision_weights = lapply(genesets,
+                                                   FUN = function(gs){tryCatch(w[gs, , drop = FALSE],
+                                                                               error=function(cond){return(NA)})
+                                                   }
+                        ),
+                        weight_object = w_full
+      )
+    }
   }
 
   class(ans_final) <- "dearseq"

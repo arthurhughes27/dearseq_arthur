@@ -46,15 +46,20 @@
 #'@return A list with the following elements when the set p-value is computed:
 #'\itemize{
 #'   \item \code{set_score_obs}: the approximation of the observed set score
+#'   \item \code{observation_scores}: the observation-level scores
 #'   \item \code{set_pval}: the associated set p-value
 #' }
 #' or a list with the following elements when gene-wise p-values are computed:
 #' \itemize{
 #'   \item \code{gene_scores_obs}: vector of approximating the observed
 #'   gene-wise scores
+#'   \item \code{observation_scores}: the observation-level scores
 #'   \item \code{gene_pvals}: vector of associated gene-wise p-values
 #' }
-#'
+#' 
+#'@param GLS logical: should an iterative generalised least squares algorithm be used for estimating
+#'the mean effect of the covariates? Default is \code{FALSE}, in which case ordinary 
+#'least squares is used.
 #'
 #'@seealso \code{\link[survey]{pchisqsum}}
 #'
@@ -100,7 +105,7 @@ vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w = NULL,
                          Sigma_xi = diag(ncol(phi)),
                          Sigma = NULL, 
                          genewise_pvals = FALSE, homogen_traj = FALSE,
-                         na.rm = FALSE) {
+                         na.rm = FALSE, GLS = FALSE) {
     ## dimensions, formatting and validity checks------
     
     # check data is provided in matrix format
@@ -175,7 +180,8 @@ vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w = NULL,
                                  w = w, Sigma_xi = Sigma_xi, na.rm = na.rm)
     } else {
         score_list <- vc_score(y = y, x = x, indiv = factor(indiv), phi = phi,
-                               w = w, Sigma = Sigma , Sigma_xi = Sigma_xi, na.rm = na.rm)
+                               w = w, Sigma = Sigma , Sigma_xi = Sigma_xi, na.rm = na.rm, 
+                               GLS = GLS)
     }
 
     if (p * n_indiv < 1) {
@@ -237,6 +243,7 @@ vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w = NULL,
         names(pv) <- rownames(y)
 
         ans <- list("gene_scores_obs" = gene_scores_obs,
+                    "observation_scores" = score_list$q,
                     "gene_pvals" = pv)
 
     } else {
@@ -277,6 +284,7 @@ vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w = NULL,
                                     method = "saddlepoint") # estimated p value
 
         ans <- list("set_score_obs" = score_list$score,
+                    "observation_scores" = score_list$q,
                     "set_pval" = dv)
     }
 

@@ -37,6 +37,10 @@
 #'@param na.rm logical: should missing values (including \code{NA} and
 #'\code{NaN}) be omitted from the calculations? Default is \code{FALSE}.
 #'
+#'@param GLS logical: should an iterative generalised least squares algorithm be used for estimating
+#'the mean effect of the covariates? Default is \code{FALSE}, in which case ordinary 
+#'least squares is used.
+#'
 #'@return A list with the following elements:\itemize{
 #'   \item \code{score}: approximation of the set observed score
 #'   \item \code{q}: observation-level contributions to the score
@@ -76,7 +80,7 @@
 #'@importFrom Matrix bdiag
 #'@export
 vc_score <- function(y, x, indiv = c(1:ncol(y)), phi, w = NULL, Sigma_xi = NULL,
-                     Sigma = NULL, na.rm = FALSE) {
+                     Sigma = NULL, na.rm = FALSE, GLS = FALSE) {
   
     ## dimensions, formatting and validity checks---
   
@@ -111,6 +115,7 @@ vc_score <- function(y, x, indiv = c(1:ncol(y)), phi, w = NULL, Sigma_xi = NULL,
     indiv <- as.factor(as.numeric(as.factor(indiv))) 
     n_indiv <- length(levels(indiv)) # number of individuals
     n_i = (summary(indiv, maxsum = n_indiv) %>% as.vector()) # number of observations per individual
+    n_obs = length(indiv) 
     
     # Check concordance of input matrices
     stopifnot(nrow(x) == n) # covariate matrix must have samples as rows
@@ -148,10 +153,50 @@ vc_score <- function(y, x, indiv = c(1:ncol(y)), phi, w = NULL, Sigma_xi = NULL,
       y_0 <- y
       }
     
-    y_T = t(y_0) # Transpose of expression matrix
-    alpha_OLS <- solve(crossprod(x)) %*% t(x) %*% y_T # OLS estimate of mean effect
-    yt_mu <- y_T - x %*% alpha_OLS # Centered gene expression given OLS estimate
-    y_mu = t(yt_mu) # Transpose of centered gene expression
+    
+    if (GLS == TRUE){
+      y_T = t(y_0)
+      # Number of iterations
+      yt_mu = matrix(0,nrow = nrow(y_T), ncol = ncol(y_T))
+      for (g in 1:p){
+      # Specify the initial model coefficients (beta)
+      beta <- solve(crossprod(x)) %*% t(x) %*% y_T[,g]
+      
+      # Perform iterative GLS
+      # for (iter in 1:max_iterations) {
+        
+        Sigma_res_inv = matrix(0 ,nrow = n_obs, ncol = n_obs)
+        diag(Sigma_res_inv) = 1/(w[g,])
+        beta = solve(t(x) %*% Sigma_res_inv %*% x) %*% t(x) %*% Sigma_res_inv %*% y_T[,g]
+        #diag(Sigma_res_inv) = 1/diag(cov(t(residuals)))
+        # Update beta using the weighted matrix
+        
+        # result <- try(solve(t(x) %*% Sigma_res_inv %*% x) %*% t(x) %*% Sigma_res_inv %*% y_T[,g], silent = TRUE)
+        # if (inherits(result, "try-error")) {
+        #   # exp1 produced an error, so evaluate exp2
+        #   new_beta <- beta
+        #   #print(paste0("Numerical singularity after ", iter, " iterations - algorithm end." ))
+        # } else {
+        #   # exp1 was successful, use its result
+        #   new_beta <- result
+        # }
+        # if (max(abs(new_beta - beta)) < tol) {
+        #   #cat("Converged after", iter, "iterations.\n")
+        #   break
+        # }
+        # beta <- new_beta
+        yt_mu[,g] <- y_T[,g] - x %*% beta
+      }
+      # }
+      #yt_mu[,1] <- y_T[,1] - x %*% beta # Centered gene expression given OLS estimate
+      y_mu = t(yt_mu)
+      
+    } else {
+      y_T = t(y_0) # Transpose of expression matrix
+      alpha_OLS <- solve(crossprod(x)) %*% t(x) %*% y_T # OLS estimate of mean effect
+      yt_mu <- y_T - x %*% alpha_OLS # Centered gene expression given OLS estimate
+      y_mu = t(yt_mu) # Transpose of centered gene expression
+    }
     
     if (cor_structure == TRUE){ # Case for when correlation structures are estimated
       
@@ -167,8 +212,22 @@ vc_score <- function(y, x, indiv = c(1:ncol(y)), phi, w = NULL, Sigma_xi = NULL,
       # Creating a list with ith element as the (long format) centered expression for individual i
       y_mu_long_list = split(y_mu_long$value, y_mu_long$individual)
       
+      # Define partial correlation function with cholesky decomposition
+      partial_corr <- function(cov) {
+        cov_inv <- solve(cov)
+        cov_inv <- Matrix::chol2inv(chol(cov))
+        diagonal <- 1 / sqrt(diag(cov_inv))
+        pcor <- -cov_inv * diagonal %*% t(diagonal)
+        diag(pcor) <- 1
+        return(pcor)
+      }
+      
       # Inverting covariance matrices using Cholesky decomposition (faster than solve())
-      sigma_inv_list = lapply(lapply(Sigma, chol), Matrix::chol2inv)
+      # sigma_inv_list = lapply(lapply(Sigma, chol), Matrix::chol2inv)
+      
+      # Apply partial correlation function to each covariance matrix in list 
+      # sigma_inv_list = lapply(Sigma, cor2pcor)
+      sigma_inv_list = lapply(Sigma, partial_corr)
       
       # mapply to perform the required matrix multiplication (faster than for loop)
       Q_indiv = mapply(FUN = function(A,B,C){return(crossprod(A,B) %*% C)}, 
