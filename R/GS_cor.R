@@ -128,7 +128,7 @@ GS_cor <- function(y, x, phi = NULL, indiv, w = NULL, use_phi = TRUE, preprocess
     } 
   }
   
-  cor_gene = cor(R_gene) # gene-wise correlation structure
+  cor_gene = cov(R_gene) # gene-wise correlation structure
   cor_obs = cor(R_obs, use = "pairwise.complete.obs") # observation-wise correlation structure
   
   # Plug in estimator of correlation matrix

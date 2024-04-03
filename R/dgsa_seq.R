@@ -83,6 +83,12 @@
 #'covariance matrices for the residual errors. Default is \code{FALSE}, in which case
 #'these structures are not estimated.
 #'
+#'@param cor_threshold a numerical value indicating the threshold below which any absolute estimated
+#'value of the partial correlation matrix are set to 0 (to prevent estimating partial
+#'correlations from noise). A recommended value is \code{0.1}. Default is \code{0}, indicating
+#'no hard thresholding to be performed on the absolute estimated partial correlation values. 
+#'
+#'
 #'@param which_test a character string indicating which method to use to
 #'approximate the variance component score test, either \code{'permutation'} or
 #'\code{'asymptotic'}. Default is \code{'permutation'}.
@@ -161,9 +167,23 @@
 #'@param return_score logical: should the variance-component score test statistics be returned? Default
 #'is \code{FALSE}.
 #'
-#'#'@param GLS logical: should an iterative generalised least squares algorithm be used for estimating
+#'@param return_Sigma logical: should the list of estimated covariance matrices be returned 
+#'for each gene set? Default is \code{FALSE}.
+#'
+#'@param return_Gamma logical: should both the "pseudo-observations", their covariance, and the 
+#'eigenvalues of their covariance be returned for each gene set? Default is \code{FALSE}.
+#'
+#'@param GLS logical: should an iterative generalised least squares algorithm be used for estimating
 #'the mean effect of the covariates? Default is \code{FALSE}, in which case ordinary 
 #'least squares is used.
+#'
+#'@param fix_Sigma A matrix of size \code{(p\times T) \times (p\times T)} representing a fixed
+#'covariance matrix of the gene expression, where \code{p} is the number of genes in each set and
+#'T is the fixed number of observations per individual. 
+#'Note: this is an experimental argument for use in simulation experiments where gene 
+#'sets are all simulated simulation experiments where gene sets are all simulated 
+#'with the same size and all individuals have the same number of observations. Default is \code{NULL}.
+#'
 #'
 #'@return A list with the following elements:\itemize{
 #'   \item \code{which_test}: a character string carrying forward the value of
@@ -275,6 +295,7 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                      which_test = c("permutation", "asymptotic"),
                      which_weights = c("loclin", "voom", "none"),
                      cor_structure = FALSE,
+                     cor_threshold = 0,
                      n_perm = 1000, progressbar = TRUE, parallel_comp = TRUE,
                      nb_cores = parallel::detectCores(logical=FALSE) - 1,
                      preprocessed = FALSE,
@@ -292,8 +313,16 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                      homogen_traj = FALSE,
                      na.rm_gsaseq = TRUE,
                      verbose = TRUE, 
-                     return_score = FALSE, 
-                     GLS = FALSE) {
+                     return_score = FALSE,
+                     return_Sigma = FALSE,
+                     return_Gamma = FALSE,
+                     GLS = FALSE, 
+                     fix_Sigma = NULL) {
+  
+  # if (!is.null(fix_Sigma)){
+  #   warning("Sigma is fixed, not returning matrices in output ")
+  #   return_Sigma = FALSE
+  # }
 
   if(weights_var2test_condi & which_test == "permutation"){
       warning("`weights_var2test_condi` must be FALSE for the ",
@@ -539,10 +568,11 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                              genewise_pvals = TRUE,
                              homogen_traj = homogen_traj,
                              na.rm = na.rm_gsaseq,
-                             GLS = GLS)
+                             GLS = GLS, cor_threshold = cor_threshold)
       rawPvals <- vc_test$gene_pvals 
       score_gene <- vc_test$gene_scores_obs
       score_obs <- vc_test$observation_scores
+      pseudo_observations = vc_test$pseudo_observations
       
     } else if (which_test == "permutation") {
       if (is.null(sample_group)) {
@@ -660,8 +690,9 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                   "be computed")
           NA
         } else {
-          
-          if (cor_structure == TRUE){
+          if (!is.null(fix_Sigma)){ # if Sigma specified as fixed matrix
+            Sigma = replicate(length(unique(sample_group)), fix_Sigma, simplify = FALSE)   
+          } else if (cor_structure == TRUE & is.null(fix_Sigma)){ #else estimate Sigma from sample 
             Sigma = GS_cor(y = y_lcpm[gs, , drop = FALSE], 
                            x = x, 
                            phi = phi, 
@@ -672,7 +703,7 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                            na.rm = na.rm_gsaseq,
                            verbose = verbose)
           } else {
-            Sigma = NULL
+            Sigma = NULL # or do not estimate Sigma
           }
           
         vc_test_asym(y = y_lcpm[gs, , drop = FALSE], x = x,
@@ -682,7 +713,7 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                        Sigma_xi = cov_variables2test_eff,
                        genewise_pvals = F,
                        homogen_traj = homogen_traj,
-                       na.rm = na.rm_gsaseq, GLS = GLS
+                       na.rm = na.rm_gsaseq, GLS = GLS, cor_threshold = cor_threshold
           )$set_pval
         }
       }, FUN.VALUE = 0.5)
@@ -698,8 +729,9 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                   "be computed")
           NA
         } else {
-          
-          if (cor_structure == TRUE){
+          if (!is.null(fix_Sigma)){
+            Sigma = replicate(length(unique(sample_group)), fix_Sigma, simplify = FALSE)
+          } else if (cor_structure == TRUE & is.null(fix_Sigma)){
             Sigma = GS_cor(y = y_lcpm[gs, , drop = FALSE], 
                            x = x, 
                            phi = phi, 
@@ -720,7 +752,7 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                        Sigma_xi = cov_variables2test_eff,
                        genewise_pvals = F,
                        homogen_traj = homogen_traj,
-                       na.rm = na.rm_gsaseq, GLS = GLS
+                       na.rm = na.rm_gsaseq, GLS = GLS, cor_threshold = cor_threshold
           )$set_score_obs
         }
       }, FUN.VALUE = 0.5)
@@ -736,7 +768,9 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
           NA
         } else {
           
-          if (cor_structure == TRUE){
+          if (!is.null(fix_Sigma)){
+            Sigma = replicate(length(unique(sample_group)), fix_Sigma, simplify = FALSE)  
+          } else if (cor_structure == TRUE & is.null(fix_Sigma)){
             Sigma = GS_cor(y = y_lcpm[gs, , drop = FALSE], 
                            x = x, 
                            phi = phi, 
@@ -757,7 +791,7 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                        Sigma_xi = cov_variables2test_eff,
                        genewise_pvals = T,
                        homogen_traj = homogen_traj,
-                       na.rm = na.rm_gsaseq, GLS = GLS
+                       na.rm = na.rm_gsaseq, GLS = GLS, cor_threshold = cor_threshold
           )$gene_scores_obs
         }
       })
@@ -773,7 +807,9 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
           NA
         } else {
           
-          if (cor_structure == TRUE){
+          if (!is.null(fix_Sigma)){
+            Sigma = replicate(length(unique(sample_group)), fix_Sigma, simplify = FALSE)  
+          } else if (cor_structure == TRUE & is.null(fix_Sigma)){
             Sigma = GS_cor(y = y_lcpm[gs, , drop = FALSE], 
                            x = x, 
                            phi = phi, 
@@ -794,13 +830,91 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                        Sigma_xi = cov_variables2test_eff,
                        genewise_pvals = T,
                        homogen_traj = homogen_traj,
-                       na.rm = na.rm_gsaseq, GLS = GLS
+                       na.rm = na.rm_gsaseq, GLS = GLS, cor_threshold = cor_threshold
           )$observation_scores
         }
       })
-      
       }
-
+      
+      if (return_Sigma == TRUE){
+        Sigma_list <- lapply(seq_along(genesets), FUN = function(i_gs) {
+          gs <- genesets[[i_gs]]
+          e <- tryCatch(y_lcpm[gs, 1, drop = FALSE],
+                        error=function(cond){return(NULL)})
+          if (length(e) < 1) {
+            warning("Gene set ", i_gs, " contains 0 measured ",
+                    "transcripts: associated p-value cannot ",
+                    "be computed")
+            NA
+          } else {
+            
+            if (!is.null(fix_Sigma)){
+              Sigma = replicate(length(unique(sample_group)), fix_Sigma, simplify = FALSE)  
+            } else if (cor_structure == TRUE & is.null(fix_Sigma)){
+              Sigma = GS_cor(y = y_lcpm[gs, , drop = FALSE], 
+                             x = x, 
+                             phi = phi, 
+                             indiv = sample_group, 
+                             w = w[gs, , drop = FALSE], 
+                             preprocessed = preprocessed, 
+                             use_phi = weights_var2test_condi, 
+                             na.rm = na.rm_gsaseq,
+                             verbose = verbose)
+            } else {
+              Sigma = NULL
+            }
+          }
+        })
+      }
+      
+      if (return_Gamma == TRUE){
+        pseudo_observations <- lapply(seq_along(genesets), FUN = function(i_gs) {
+          gs <- genesets[[i_gs]]
+          e <- tryCatch(y_lcpm[gs, 1, drop = FALSE],
+                        error=function(cond){return(NULL)})
+          if (length(e) < 1) {
+            warning("Gene set ", i_gs, " contains 0 measured ",
+                    "transcripts: associated p-value cannot ",
+                    "be computed")
+            NA
+          } else {
+            if (!is.null(fix_Sigma)){ # if Sigma specified as fixed matrix
+              Sigma = replicate(length(unique(sample_group)), fix_Sigma, simplify = FALSE)   
+            } else if (cor_structure == TRUE & is.null(fix_Sigma)){ #else estimate Sigma from sample 
+              Sigma = GS_cor(y = y_lcpm[gs, , drop = FALSE], 
+                             x = x, 
+                             phi = phi, 
+                             indiv = sample_group, 
+                             w = w[gs, , drop = FALSE], 
+                             preprocessed = preprocessed, 
+                             use_phi = weights_var2test_condi, 
+                             na.rm = na.rm_gsaseq,
+                             verbose = verbose)
+            } else {
+              Sigma = NULL # or do not estimate Sigma
+            }
+            
+            vc_test_asym(y = y_lcpm[gs, , drop = FALSE], x = x,
+                         indiv = sample_group, phi = phi,
+                         w = w[gs, , drop = FALSE],
+                         Sigma = Sigma,
+                         Sigma_xi = cov_variables2test_eff,
+                         genewise_pvals = F,
+                         homogen_traj = homogen_traj,
+                         na.rm = na.rm_gsaseq, GLS = GLS, cor_threshold = cor_threshold
+            )$pseudo_observations
+          }
+        })
+        
+        Gamma = lapply(pseudo_observations, cov)
+        eigenvalues = lapply(Gamma, FUN = function(gamma){
+          return(eigen(gamma, symmetric = TRUE, only.values = TRUE)$values)})
+        
+        Gamma_list = list(pseudo_observations = pseudo_observations, 
+                          Gamma = Gamma, 
+                          eigenvaues = eigenvalues)
+        
+      }
       
     } else if (which_test == "permutation") {
       if (is.null(sample_group)) {
@@ -908,6 +1022,36 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
         
         
       }
+      if (return_Sigma == TRUE){
+        Sigma_list <- lapply(seq_along(genesets), FUN = function(i_gs) {
+          gs <- genesets[[i_gs]]
+          e <- tryCatch(y_lcpm[gs, 1, drop = FALSE],
+                        error=function(cond){return(NULL)})
+          if (length(e) < 1) {
+            warning("Gene set ", i_gs, " contains 0 measured ",
+                    "transcripts: associated p-value cannot ",
+                    "be computed")
+            NA
+          } else {
+            
+            if (!is.null(fix_Sigma)){
+              Sigma = replicate(length(unique(sample_group)), fix_Sigma, simplify = FALSE)  
+            } else if (cor_structure == TRUE & is.null(fix_Sigma)){
+              Sigma = GS_cor(y = y_lcpm[gs, , drop = FALSE], 
+                             x = x, 
+                             phi = phi, 
+                             indiv = sample_group, 
+                             w = w[gs, , drop = FALSE], 
+                             preprocessed = preprocessed, 
+                             use_phi = weights_var2test_condi, 
+                             na.rm = na.rm_gsaseq,
+                             verbose = verbose)
+            } else {
+              Sigma = NULL
+            }
+          }
+        })
+      }
     }
     
     if (return_score == TRUE){
@@ -928,12 +1072,20 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
     }
 
   }
+  if (return_Sigma == FALSE){
+    Sigma_list = NULL
+  }
+  
+  if (return_Gamma == FALSE){
+    Gamma_list = NULL
+  } 
   
   if (return_score == TRUE){
   if(is.null(genesets)){
     ans_final <- list(which_test = which_test, preprocessed = preprocessed,
                       n_perm = n_perm, pvals = pvals, precision_weights = w,
-                      weight_object = w_full, score = score
+                      weight_object = w_full, score = score, Sigma_list = Sigma_list, 
+                      Gamma_list = Gamma_list
     )
   }else{
     ans_final <- list(which_test = which_test, preprocessed = preprocessed,
@@ -943,13 +1095,15 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                                                                   error=function(cond){return(NA)})
                                                  }
                       ),
-                      weight_object = w_full, score = score
+                      weight_object = w_full, score = score, Sigma_list = Sigma_list, 
+                      Gamma_list = Gamma_list
     )
   }} else {
     if(is.null(genesets)){
       ans_final <- list(which_test = which_test, preprocessed = preprocessed,
                         n_perm = n_perm, pvals = pvals, precision_weights = w,
-                        weight_object = w_full
+                        weight_object = w_full, Sigma_list = Sigma_list, 
+                        Gamma_list = Gamma_list
       )
     }else{
       ans_final <- list(which_test = which_test, preprocessed = preprocessed,
@@ -959,7 +1113,8 @@ dgsa_seq <- function(exprmat = NULL, object = NULL,
                                                                                error=function(cond){return(NA)})
                                                    }
                         ),
-                        weight_object = w_full
+                        weight_object = w_full, Sigma_list = Sigma_list, 
+                        Gamma_list = Gamma_list
       )
     }
   }

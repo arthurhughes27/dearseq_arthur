@@ -15,6 +15,7 @@
 #'\code{\link[edgeR:DGEList]{DGEList}}.
 #'Default is \code{NULL}, in which case \code{exprmat} must not be
 #'\code{NULL}.
+#'a
 #'
 #'@param covariates \itemize{
 #'\item If \code{exprmat} is specified as a matrix:

@@ -61,6 +61,11 @@
 #'the mean effect of the covariates? Default is \code{FALSE}, in which case ordinary 
 #'least squares is used.
 #'
+#'@param cor_threshold a numerical value indicating the threshold below which any absolute estimated
+#'value of the partial correlation matrix are set to 0 (to prevent estimating partial
+#'correlations from noise). A recommended value is \code{0.1}. Default is \code{0}, indicating
+#'no hard thresholding to be performed on the absolute estimated partial correlation values.
+#'
 #'@seealso \code{\link[survey]{pchisqsum}}
 #'
 #'@references
@@ -105,7 +110,7 @@ vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w = NULL,
                          Sigma_xi = diag(ncol(phi)),
                          Sigma = NULL, 
                          genewise_pvals = FALSE, homogen_traj = FALSE,
-                         na.rm = FALSE, GLS = FALSE) {
+                         na.rm = FALSE, GLS = FALSE, cor_threshold = 0) {
     ## dimensions, formatting and validity checks------
     
     # check data is provided in matrix format
@@ -181,14 +186,14 @@ vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w = NULL,
     } else {
         score_list <- vc_score(y = y, x = x, indiv = factor(indiv), phi = phi,
                                w = w, Sigma = Sigma , Sigma_xi = Sigma_xi, na.rm = na.rm, 
-                               GLS = GLS)
+                               GLS = GLS, cor_threshold = cor_threshold)
     }
 
     if (p * n_indiv < 1) {
         stop("no gene measured/no sample included ...")
     }
     
-    Q_indiv = t(score_list$q)
+    Q_indiv = t(score_list$q_ext)
     
     if (genewise_pvals) {
         gene_scores_obs <- score_list$gene_scores_unscaled
@@ -258,8 +263,11 @@ vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w = NULL,
           # }
           # Gamma = (1/n_indiv)*Reduce('+', Q_list) # scaled estimated covariance matrix of 
           #                                         # individual-level contributions
-          
+          if (is.null(Sigma)){
           Gamma = cov(score_list$q_ext)
+          } else {
+            Gamma = cov(score_list$q_ext)
+          }
         }
 
         lam <- tryCatch(eigen(Gamma, symmetric = TRUE, only.values = TRUE)$values,
@@ -285,8 +293,11 @@ vc_test_asym <- function(y, x, indiv = rep(1, nrow(x)), phi, w = NULL,
 
         ans <- list("set_score_obs" = score_list$score,
                     "observation_scores" = score_list$q,
+                    "pseudo_observations" = score_list$q_ext,
                     "set_pval" = dv)
     }
+    
+      
 
     return(ans)
 }
